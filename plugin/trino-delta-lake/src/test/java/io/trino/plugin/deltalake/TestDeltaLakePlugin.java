@@ -23,9 +23,13 @@ import io.trino.testing.TestingConnectorContext;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static com.google.common.collect.Iterables.getOnlyElement;
+import static com.google.common.io.MoreFiles.deleteRecursively;
+import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class TestDeltaLakePlugin
@@ -45,16 +49,23 @@ public class TestDeltaLakePlugin
 
     @Test
     public void testCreateTestingConnector()
+            throws IOException
     {
-        Plugin plugin = new TestingDeltaLakePlugin();
-        ConnectorFactory factory = getOnlyElement(plugin.getConnectorFactories());
-        factory.create(
-                "test",
-                        ImmutableMap.of(
-                                "hive.metastore.uri", "thrift://foo:1234",
-                                "bootstrap.quiet", "true"),
-                        new TestingConnectorContext())
-                .shutdown();
+        Path baseDir = Files.createTempDirectory("test_delta_lake");
+        try {
+            Plugin plugin = new TestingDeltaLakePlugin(baseDir);
+            ConnectorFactory factory = getOnlyElement(plugin.getConnectorFactories());
+            factory.create(
+                            "test",
+                            ImmutableMap.of(
+                                    "hive.metastore.uri", "thrift://foo:1234",
+                                    "bootstrap.quiet", "true"),
+                            new TestingConnectorContext())
+                    .shutdown();
+        }
+        finally {
+            deleteRecursively(baseDir, ALLOW_INSECURE);
+        }
     }
 
     @Test

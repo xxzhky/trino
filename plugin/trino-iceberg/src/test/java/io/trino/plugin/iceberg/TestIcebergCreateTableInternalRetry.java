@@ -90,7 +90,7 @@ public class TestIcebergCreateTableInternalRetry
             }
         };
 
-        queryRunner.installPlugin(new TestingIcebergPlugin(Optional.of(new TestingIcebergFileMetastoreCatalogModule(metastore)), Optional.empty(), EMPTY_MODULE));
+        queryRunner.installPlugin(new TestingIcebergPlugin(metastoreDir.toPath(), Optional.of(new TestingIcebergFileMetastoreCatalogModule(metastore)), Optional.empty(), EMPTY_MODULE));
         queryRunner.createCatalog(ICEBERG_CATALOG, "iceberg", ImmutableMap.of("iceberg.register-table-procedure.enabled", "true"));
         queryRunner.execute("CREATE SCHEMA " + SCHEMA_NAME);
         return queryRunner;

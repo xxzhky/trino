@@ -16,7 +16,9 @@ package io.trino.plugin.deltalake;
 import com.google.common.collect.ImmutableMap;
 import io.trino.Session;
 import io.trino.plugin.hive.metastore.HiveMetastore;
+import io.trino.plugin.hive.metastore.HiveMetastoreFactory;
 import io.trino.testing.AbstractTestQueryFramework;
+import io.trino.testing.DistributedQueryRunner;
 import io.trino.testing.QueryRunner;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -25,12 +27,12 @@ import org.junit.jupiter.api.TestInstance;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Optional;
 
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
 import static io.trino.plugin.deltalake.DeltaLakeQueryRunner.DELTA_CATALOG;
 import static io.trino.plugin.deltalake.DeltaLakeQueryRunner.createDeltaLakeQueryRunner;
-import static io.trino.plugin.hive.metastore.file.TestingFileHiveMetastore.createTestingFileHiveMetastore;
 import static io.trino.testing.TestingNames.randomNameSuffix;
 import static java.lang.String.format;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,14 +43,12 @@ public class TestDeltaLakeLegacyCreateTableWithExistingLocation
         extends AbstractTestQueryFramework
 {
     private File dataDirectory;
-    private HiveMetastore metastore;
 
     @Override
     protected QueryRunner createQueryRunner()
             throws Exception
     {
         this.dataDirectory = Files.createTempDirectory("test_delta_lake").toFile();
-        this.metastore = createTestingFileHiveMetastore(dataDirectory);
 
         return createDeltaLakeQueryRunner(
                 DELTA_CATALOG,
@@ -75,6 +75,11 @@ public class TestDeltaLakeLegacyCreateTableWithExistingLocation
 
         assertQuerySucceeds("CREATE TABLE " + tableName + " AS SELECT 1 as a, 'INDIA' as b, true as c");
         assertQuery("SELECT * FROM " + tableName, "VALUES (1, 'INDIA', true)");
+
+        DistributedQueryRunner queryRunner = (DistributedQueryRunner) getQueryRunner();
+        HiveMetastore metastore = ((DeltaLakeConnector) queryRunner.getCoordinator().getConnector(DELTA_CATALOG)).getInjector()
+                .getInstance(HiveMetastoreFactory.class)
+                .createMetastore(Optional.empty());
 
         String tableLocation = (String) computeScalar("SELECT DISTINCT regexp_replace(\"$path\", '/[^/]*$', '') FROM " + tableName);
         metastore.dropTable("tpch", tableName, false);

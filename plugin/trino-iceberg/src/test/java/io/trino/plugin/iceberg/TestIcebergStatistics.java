@@ -154,7 +154,7 @@ public class TestIcebergStatistics
                         VALUES
                           ('nationkey', null, 25, 0, null, '0', '24'),
                           ('regionkey', null, 5, 0, null, '0', '4'),
-                          ('name', 1908.0, 25, 0, null, null, null),
+                          ('name', 2216.0, 25, 0, null, null, null),
                           ('info', null, null, null, null, null, null),
                           (null, null, null, null, 50, null, null)""");
 
@@ -165,8 +165,8 @@ public class TestIcebergStatistics
                         VALUES
                           ('nationkey', null, 25, 0, null, '0', '24'),
                           ('regionkey', null, 5, 0, null, '0', '4'),
-                          ('name', 1908.0, 25, 0, null, null, null),
-                          ('info', 4417.0, 25, 0.1, null, null, null),
+                          ('name', 2216.0, 25, 0, null, null, null),
+                          ('info', 5027.0, 25, 0.1, null, null, null),
                           (null, null, null, null, 50, null, null)"""); // Row count statistics do not yet account for position deletes
 
         assertUpdate("DROP TABLE " + tableName);

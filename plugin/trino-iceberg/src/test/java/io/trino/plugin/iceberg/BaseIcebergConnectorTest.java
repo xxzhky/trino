@@ -104,7 +104,6 @@ import static io.trino.SystemSessionProperties.SCALE_WRITERS;
 import static io.trino.SystemSessionProperties.TASK_MAX_WRITER_COUNT;
 import static io.trino.SystemSessionProperties.TASK_MIN_WRITER_COUNT;
 import static io.trino.SystemSessionProperties.USE_PREFERRED_WRITE_PARTITIONING;
-import static io.trino.plugin.hive.metastore.file.TestingFileHiveMetastore.createTestingFileHiveMetastore;
 import static io.trino.plugin.iceberg.IcebergFileFormat.AVRO;
 import static io.trino.plugin.iceberg.IcebergFileFormat.ORC;
 import static io.trino.plugin.iceberg.IcebergFileFormat.PARQUET;
@@ -6955,7 +6954,7 @@ public abstract class BaseIcebergConnectorTest
                         "iceberg.catalog.type", "TESTING_FILE_METASTORE",
                         "hive.metastore.catalog.dir", dataDirectory.getPath()));
 
-        queryRunner.installPlugin(new TestingHivePlugin(createTestingFileHiveMetastore(dataDirectory)));
+        queryRunner.installPlugin(new TestingHivePlugin(dataDirectory.toPath()));
         queryRunner.createCatalog(
                 hiveRedirectionCatalog,
                 "hive",

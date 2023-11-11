@@ -55,7 +55,7 @@ public class TestDeltaLakeCreateTableInternalRetry
     private static final String CATALOG_NAME = "delta_lake";
     private static final String SCHEMA_NAME = "test_create_table";
 
-    private String dataDirectory;
+    private Path dataDirectory;
 
     @Override
     protected QueryRunner createQueryRunner()
@@ -67,13 +67,13 @@ public class TestDeltaLakeCreateTableInternalRetry
                 .build();
         DistributedQueryRunner queryRunner = DistributedQueryRunner.builder(session).build();
 
-        dataDirectory = queryRunner.getCoordinator().getBaseDataDir().resolve("delta_lake_data").toString();
+        dataDirectory = queryRunner.getCoordinator().getBaseDataDir().resolve("delta_lake_data");
         HiveMetastore metastore = new FileHiveMetastore(
                 new NodeVersion("testversion"),
                 HDFS_FILE_SYSTEM_FACTORY,
                 new HiveMetastoreConfig().isHideDeltaLakeTables(),
                 new FileHiveMetastoreConfig()
-                        .setCatalogDirectory(dataDirectory)
+                        .setCatalogDirectory(dataDirectory.toString())
                         .setMetastoreUser("test"))
         {
             @Override
@@ -92,7 +92,7 @@ public class TestDeltaLakeCreateTableInternalRetry
                 throw new TableAlreadyExistsException(table.getSchemaTableName());
             }
         };
-        queryRunner.installPlugin(new TestingDeltaLakePlugin(Optional.of(new TestingDeltaLakeMetastoreModule(metastore)), Optional.empty(), EMPTY_MODULE));
+        queryRunner.installPlugin(new TestingDeltaLakePlugin(dataDirectory, Optional.of(new TestingDeltaLakeMetastoreModule(metastore)), Optional.empty(), EMPTY_MODULE));
         queryRunner.createCatalog(CATALOG_NAME, CONNECTOR_NAME, Map.of("delta.register-table-procedure.enabled", "true"));
         queryRunner.execute("CREATE SCHEMA " + SCHEMA_NAME);
         return queryRunner;
@@ -103,7 +103,7 @@ public class TestDeltaLakeCreateTableInternalRetry
             throws IOException
     {
         if (dataDirectory != null) {
-            deleteRecursively(Path.of(dataDirectory), ALLOW_INSECURE);
+            deleteRecursively(dataDirectory, ALLOW_INSECURE);
         }
     }
 

@@ -255,7 +255,8 @@ public final class HiveQueryRunner
                 }
 
                 HiveMetastore metastore = this.metastore.apply(queryRunner);
-                queryRunner.installPlugin(new TestingHivePlugin(Optional.of(metastore), openTelemetry, module, directoryLister));
+                Path dataDir = queryRunner.getCoordinator().getBaseDataDir().resolve("hive_data");
+                queryRunner.installPlugin(new TestingHivePlugin(dataDir, Optional.of(metastore), openTelemetry, module, directoryLister));
 
                 Map<String, String> hiveProperties = new HashMap<>();
                 if (!skipTimezoneSetup) {

@@ -20,7 +20,9 @@ import io.trino.filesystem.FileIterator;
 import io.trino.filesystem.Location;
 import io.trino.filesystem.TrinoFileSystem;
 import io.trino.plugin.hive.metastore.HiveMetastore;
+import io.trino.plugin.hive.metastore.HiveMetastoreFactory;
 import io.trino.testing.AbstractTestQueryFramework;
+import io.trino.testing.DistributedQueryRunner;
 import io.trino.testing.MaterializedResult;
 import io.trino.testing.QueryRunner;
 import org.apache.hadoop.conf.Configuration;
@@ -42,14 +44,14 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static com.google.common.base.Verify.verify;
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
-import static io.trino.plugin.hive.metastore.file.TestingFileHiveMetastore.createTestingFileHiveMetastore;
+import static io.trino.plugin.iceberg.IcebergQueryRunner.ICEBERG_CATALOG;
 import static io.trino.plugin.iceberg.IcebergTestUtils.getFileSystemFactory;
 import static io.trino.plugin.iceberg.IcebergUtil.METADATA_FOLDER_NAME;
 import static io.trino.plugin.iceberg.procedure.RegisterTableProcedure.getLatestMetadataLocation;
@@ -63,9 +65,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TestIcebergRegisterTableProcedure
         extends AbstractTestQueryFramework
 {
-    private HiveMetastore metastore;
     private File metastoreDir;
     private TrinoFileSystem fileSystem;
+    private HiveMetastore metastore;
 
     @Override
     protected QueryRunner createQueryRunner()
@@ -73,11 +75,14 @@ public class TestIcebergRegisterTableProcedure
     {
         metastoreDir = Files.createTempDirectory("test_iceberg_register_table").toFile();
         metastoreDir.deleteOnExit();
-        metastore = createTestingFileHiveMetastore(metastoreDir);
-        return IcebergQueryRunner.builder()
+        DistributedQueryRunner queryRunner = IcebergQueryRunner.builder()
                 .setMetastoreDirectory(metastoreDir)
                 .setIcebergProperties(ImmutableMap.of("iceberg.register-table-procedure.enabled", "true"))
                 .build();
+        metastore = ((IcebergConnector) queryRunner.getCoordinator().getConnector(ICEBERG_CATALOG)).getInjector()
+                .getInstance(HiveMetastoreFactory.class)
+                .createMetastore(Optional.empty());
+        return queryRunner;
     }
 
     @BeforeAll
@@ -298,12 +303,12 @@ public class TestIcebergRegisterTableProcedure
         String tableLocation = getTableLocation(tableName);
         String tableNameNew = tableName + "_new";
         // Delete files under metadata directory to verify register_table call fails
-        deleteRecursively(Path.of(tableLocation, METADATA_FOLDER_NAME), ALLOW_INSECURE);
+        fileSystem.deleteDirectory(Location.of(tableLocation).appendPath(METADATA_FOLDER_NAME));
 
         assertQueryFails("CALL iceberg.system.register_table (CURRENT_SCHEMA, '" + tableNameNew + "', '" + tableLocation + "')",
                 ".*No versioned metadata file exists at location.*");
         dropTableFromMetastore(tableName);
-        deleteRecursively(Path.of(tableLocation), ALLOW_INSECURE);
+        fileSystem.deleteDirectory(Location.of(tableLocation));
     }
 
     @Test
@@ -448,11 +453,12 @@ public class TestIcebergRegisterTableProcedure
 
         // create hadoop table
         String hadoopTableName = "hadoop_table_" + randomNameSuffix();
-        String hadoopTableLocation = metastoreDir.getPath() + "/" + hadoopTableName;
+        String hadoopTableLocation = "local:///" + hadoopTableName;
         HadoopTables hadoopTables = new HadoopTables(new Configuration(false));
         Schema schema = new Schema(ImmutableList.of(
                 Types.NestedField.optional(1, "id", Types.IntegerType.get()),
                 Types.NestedField.optional(2, "name", Types.StringType.get())));
+        // TODO replace Iceberg code that uses HDFS with Trino code that uses TrinoFileSystem
         Table table = hadoopTables.create(
                 schema,
                 PartitionSpec.unpartitioned(),

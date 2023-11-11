@@ -14,15 +14,16 @@
 package io.trino.plugin.deltalake;
 
 import io.trino.Session;
+import io.trino.plugin.hive.metastore.HiveMetastoreFactory;
 import io.trino.testing.DistributedQueryRunner;
 import io.trino.testing.QueryRunner;
 
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 import static io.trino.plugin.deltalake.DeltaLakeConnectorFactory.CONNECTOR_NAME;
-import static io.trino.plugin.hive.metastore.file.TestingFileHiveMetastore.createTestingFileHiveMetastore;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 
 public class TestDeltaLakeTableWithCustomLocationUsingHiveMetastore
@@ -42,13 +43,16 @@ public class TestDeltaLakeTableWithCustomLocationUsingHiveMetastore
 
         Map<String, String> connectorProperties = new HashMap<>();
         metastoreDir = Files.createTempDirectory("test_delta_lake").toFile();
-        metastore = createTestingFileHiveMetastore(metastoreDir);
         connectorProperties.putIfAbsent("delta.unique-table-location", "true");
         connectorProperties.putIfAbsent("hive.metastore", "file");
         connectorProperties.putIfAbsent("hive.metastore.catalog.dir", metastoreDir.getPath());
 
-        queryRunner.installPlugin(new TestingDeltaLakePlugin());
+        queryRunner.installPlugin(new TestingDeltaLakePlugin(metastoreDir.toPath()));
         queryRunner.createCatalog(CATALOG_NAME, CONNECTOR_NAME, connectorProperties);
+
+        metastore = ((DeltaLakeConnector) queryRunner.getCoordinator().getConnector(CATALOG_NAME)).getInjector()
+                .getInstance(HiveMetastoreFactory.class)
+                .createMetastore(Optional.empty());
 
         queryRunner.execute("CREATE SCHEMA " + SCHEMA);
 

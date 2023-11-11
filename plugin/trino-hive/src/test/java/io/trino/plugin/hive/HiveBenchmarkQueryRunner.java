@@ -18,6 +18,7 @@ import io.trino.Session;
 import io.trino.benchmark.BenchmarkSuite;
 import io.trino.plugin.hive.metastore.Database;
 import io.trino.plugin.hive.metastore.HiveMetastore;
+import io.trino.plugin.hive.metastore.HiveMetastoreFactory;
 import io.trino.plugin.tpch.TpchConnectorFactory;
 import io.trino.spi.security.PrincipalType;
 import io.trino.testing.LocalQueryRunner;
@@ -30,7 +31,6 @@ import java.util.Optional;
 
 import static com.google.common.io.MoreFiles.deleteRecursively;
 import static com.google.common.io.RecursiveDeleteOption.ALLOW_INSECURE;
-import static io.trino.plugin.hive.metastore.file.TestingFileHiveMetastore.createTestingFileHiveMetastore;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 import static java.util.Objects.requireNonNull;
 
@@ -65,18 +65,20 @@ public final class HiveBenchmarkQueryRunner
 
         // add hive
         File hiveDir = new File(tempDir, "hive_data");
-        HiveMetastore metastore = createTestingFileHiveMetastore(hiveDir);
-
-        metastore.createDatabase(
-                Database.builder()
-                        .setDatabaseName("tpch")
-                        .setOwnerName(Optional.of("public"))
-                        .setOwnerType(Optional.of(PrincipalType.ROLE))
-                        .build());
 
         Map<String, String> hiveCatalogConfig = ImmutableMap.of("hive.max-split-size", "10GB");
 
-        localQueryRunner.createCatalog("hive", new TestingHiveConnectorFactory(metastore), hiveCatalogConfig);
+        localQueryRunner.createCatalog("hive", new TestingHiveConnectorFactory(hiveDir.toPath()), hiveCatalogConfig);
+
+        HiveMetastore metastore = ((HiveConnector) localQueryRunner.getConnector("hive")).getInjector()
+                .getInstance(HiveMetastoreFactory.class)
+                .createMetastore(Optional.empty());
+
+        metastore.createDatabase(Database.builder()
+                .setDatabaseName("tpch")
+                .setOwnerName(Optional.of("public"))
+                .setOwnerType(Optional.of(PrincipalType.ROLE))
+                .build());
 
         localQueryRunner.execute("CREATE TABLE orders AS SELECT * FROM tpch.sf1.orders");
         localQueryRunner.execute("CREATE TABLE lineitem AS SELECT * FROM tpch.sf1.lineitem");

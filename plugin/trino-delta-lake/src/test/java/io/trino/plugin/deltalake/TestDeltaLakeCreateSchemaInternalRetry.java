@@ -53,7 +53,7 @@ public class TestDeltaLakeCreateSchemaInternalRetry
     private static final String TEST_SCHEMA_TIMEOUT = "test_delta_lake_schema_" + randomNameSuffix();
     private static final String TEST_SCHEMA_DIFFERENT_SESSION = "test_delta_lake_schema_" + randomNameSuffix();
 
-    private String dataDirectory;
+    private Path dataDirectory;
     private HiveMetastore metastore;
 
     @Override
@@ -65,13 +65,13 @@ public class TestDeltaLakeCreateSchemaInternalRetry
                 .build();
         DistributedQueryRunner queryRunner = DistributedQueryRunner.builder(session).build();
 
-        this.dataDirectory = queryRunner.getCoordinator().getBaseDataDir().resolve("delta_lake_data").toString();
+        this.dataDirectory = queryRunner.getCoordinator().getBaseDataDir().resolve("delta_lake_data");
         this.metastore = new FileHiveMetastore(
                 new NodeVersion("testversion"),
                 HDFS_FILE_SYSTEM_FACTORY,
                 new HiveMetastoreConfig().isHideDeltaLakeTables(),
                 new FileHiveMetastoreConfig()
-                        .setCatalogDirectory(dataDirectory)
+                        .setCatalogDirectory(dataDirectory.toString())
                         .setMetastoreUser("test"))
         {
             @Override
@@ -91,7 +91,7 @@ public class TestDeltaLakeCreateSchemaInternalRetry
             }
         };
 
-        queryRunner.installPlugin(new TestingDeltaLakePlugin(Optional.of(new TestingDeltaLakeMetastoreModule(metastore)), Optional.empty(), EMPTY_MODULE));
+        queryRunner.installPlugin(new TestingDeltaLakePlugin(dataDirectory, Optional.of(new TestingDeltaLakeMetastoreModule(metastore)), Optional.empty(), EMPTY_MODULE));
         queryRunner.createCatalog(CATALOG_NAME, CONNECTOR_NAME, Map.of());
         return queryRunner;
     }
@@ -103,7 +103,7 @@ public class TestDeltaLakeCreateSchemaInternalRetry
         if (metastore != null) {
             metastore.dropDatabase(TEST_SCHEMA_TIMEOUT, false);
             metastore.dropDatabase(TEST_SCHEMA_DIFFERENT_SESSION, false);
-            deleteRecursively(Path.of(dataDirectory), ALLOW_INSECURE);
+            deleteRecursively(dataDirectory, ALLOW_INSECURE);
         }
     }
 
