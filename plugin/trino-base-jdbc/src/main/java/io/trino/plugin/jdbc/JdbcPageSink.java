@@ -33,6 +33,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
@@ -65,7 +67,8 @@ public class JdbcPageSink
     private PreparedStatement statement;
     private List<Type> columnTypes;
     private List<WriteFunction> columnWriters;
-    private int batchSize;
+
+    private final BatchStats batchStats = new BatchStats();
 
     public JdbcPageSink(ConnectorSession session, JdbcOutputTableHandle handle, JdbcClient jdbcClient, ConnectorPageSinkId pageSinkId, RemoteQueryModifier remoteQueryModifier)
     {
@@ -165,14 +168,14 @@ public class JdbcPageSink
                     appendColumn(page, position, channel);
                 }
 
-                statement.addBatch();
-                batchSize++;
+                batchStats.size.addAndGet(getPositionSize(page, position));
 
-                if (batchSize >= maxBatchSize) {
+                statement.addBatch();
+                if (batchStats.rows.incrementAndGet() >= maxBatchSize) {
                     statement.executeBatch();
                     connection.commit();
                     connection.setAutoCommit(false);
-                    batchSize = 0;
+                    batchStats.committed();
                 }
             }
         }
@@ -180,6 +183,15 @@ public class JdbcPageSink
             throw new TrinoException(JDBC_ERROR, e);
         }
         return NOT_BLOCKED;
+    }
+
+    private long getPositionSize(Page page, int position)
+    {
+        long size = 0;
+        for (int channel = 0; channel < page.getChannelCount(); channel++) {
+            size += page.getBlock(channel).getEstimatedDataSizeForStats(position);
+        }
+        return size;
     }
 
     private void appendColumn(Page page, int position, int channel)
@@ -223,7 +235,7 @@ public class JdbcPageSink
         // commit and close
         try (Connection connection = this.connection;
                 PreparedStatement statement = this.statement) {
-            if (batchSize > 0) {
+            if (batchStats.rows.get() > 0) {
                 statement.executeBatch();
                 connection.commit();
             }
@@ -269,8 +281,28 @@ public class JdbcPageSink
         }
     }
 
+    @Override
+    public long getCompletedBytes()
+    {
+        return batchStats.totalSize().get();
+    }
+
     private static Function<String, String> adapt(RemoteQueryModifier modifier, ConnectorSession session)
     {
         return query -> modifier.apply(session, query);
+    }
+
+    private record BatchStats(AtomicInteger rows, AtomicLong size, AtomicLong totalSize)
+    {
+        public BatchStats()
+        {
+            this(new AtomicInteger(0), new AtomicLong(0), new AtomicLong(0));
+        }
+
+        public void committed()
+        {
+            rows.set(0);
+            totalSize.getAndAccumulate(size.getAndSet(0), Long::sum);
+        }
     }
 }
