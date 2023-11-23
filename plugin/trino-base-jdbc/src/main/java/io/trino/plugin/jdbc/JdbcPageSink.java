@@ -32,6 +32,8 @@ import java.sql.SQLNonTransientException;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Verify.verify;
@@ -41,25 +43,50 @@ import static io.trino.plugin.jdbc.JdbcErrorCode.JDBC_ERROR;
 import static io.trino.plugin.jdbc.JdbcErrorCode.JDBC_NON_TRANSIENT_ERROR;
 import static io.trino.plugin.jdbc.JdbcWriteSessionProperties.getWriteBatchSize;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
+import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 
 public class JdbcPageSink
         implements ConnectorPageSink
 {
-    private final Connection connection;
-    private final PreparedStatement statement;
+    private final AtomicBoolean initialized = new AtomicBoolean(false);
 
-    private final List<Type> columnTypes;
-    private final List<WriteFunction> columnWriters;
-    private final int maxBatchSize;
-    private int batchSize;
-
+    private final ConnectorSession session;
+    private final JdbcClient jdbcClient;
+    private final JdbcOutputTableHandle handle;
     private final ConnectorPageSinkId pageSinkId;
+    private final Function<String, String> remoteQueryModifier;
     private final LongWriteFunction pageSinkIdWriteFunction;
     private final boolean includePageSinkIdColumn;
 
+    private final int maxBatchSize;
+
+    private Connection connection;
+    private PreparedStatement statement;
+    private List<Type> columnTypes;
+    private List<WriteFunction> columnWriters;
+    private int batchSize;
+
     public JdbcPageSink(ConnectorSession session, JdbcOutputTableHandle handle, JdbcClient jdbcClient, ConnectorPageSinkId pageSinkId, RemoteQueryModifier remoteQueryModifier)
     {
+        this.session = requireNonNull(session, "session is null");
+        this.jdbcClient = requireNonNull(jdbcClient, "jdbcClient is null");
+        this.handle = requireNonNull(handle, "handle is null");
+        this.pageSinkId = requireNonNull(pageSinkId, "pageSinkId is null");
+        this.remoteQueryModifier = adapt(requireNonNull(remoteQueryModifier, "remoteQueryModifier is null"), session);
+        this.pageSinkIdWriteFunction = (LongWriteFunction) jdbcClient.toWriteMapping(session, BaseJdbcClient.TRINO_PAGE_SINK_ID_COLUMN_TYPE).getWriteFunction();
+        this.includePageSinkIdColumn = handle.getPageSinkIdColumnName().isPresent();
+
+        // Making batch size configurable allows performance tuning for insert/write-heavy workloads over multiple connections.
+        this.maxBatchSize = getWriteBatchSize(session);
+    }
+
+    protected void initialize()
+    {
+        if (!initialized.compareAndSet(false, true)) {
+            return;
+        }
+
         try {
             connection = jdbcClient.getConnection(session, handle);
         }
@@ -79,11 +106,6 @@ public class JdbcPageSink
             closeAllSuppress(e, connection);
             throw new TrinoException(JDBC_ERROR, e);
         }
-
-        this.pageSinkId = pageSinkId;
-
-        pageSinkIdWriteFunction = (LongWriteFunction) jdbcClient.toWriteMapping(session, BaseJdbcClient.TRINO_PAGE_SINK_ID_COLUMN_TYPE).getWriteFunction();
-        includePageSinkIdColumn = handle.getPageSinkIdColumnName().isPresent();
 
         columnTypes = handle.getColumnTypes();
 
@@ -113,7 +135,7 @@ public class JdbcPageSink
 
         String sinkSql = getSinkSql(jdbcClient, handle, columnWriters);
         try {
-            sinkSql = remoteQueryModifier.apply(session, sinkSql);
+            sinkSql = remoteQueryModifier.apply(sinkSql);
             statement = connection.prepareStatement(sinkSql);
         }
         catch (TrinoException e) {
@@ -123,9 +145,6 @@ public class JdbcPageSink
             closeAllSuppress(e, connection);
             throw new TrinoException(JDBC_ERROR, e);
         }
-
-        // Making batch size configurable allows performance tuning for insert/write-heavy workloads over multiple connections.
-        this.maxBatchSize = getWriteBatchSize(session);
     }
 
     protected String getSinkSql(JdbcClient jdbcClient, JdbcOutputTableHandle outputTableHandle, List<WriteFunction> columnWriters)
@@ -136,6 +155,8 @@ public class JdbcPageSink
     @Override
     public CompletableFuture<?> appendPage(Page page)
     {
+        initialize();
+
         try {
             for (int position = 0; position < page.getPositionCount(); position++) {
                 if (includePageSinkIdColumn) {
@@ -197,6 +218,10 @@ public class JdbcPageSink
     @Override
     public CompletableFuture<Collection<Slice>> finish()
     {
+        if (!initialized.get()) {
+            return completedFuture(ImmutableList.of());
+        }
+
         // commit and close
         try (Connection connection = this.connection;
                 PreparedStatement statement = this.statement) {
@@ -229,6 +254,10 @@ public class JdbcPageSink
     @Override
     public void abort()
     {
+        if (!initialized.get()) {
+            return;
+        }
+
         // rollback and close
         try (Connection connection = this.connection;
                 PreparedStatement statement = this.statement) {
@@ -240,5 +269,10 @@ public class JdbcPageSink
         catch (SQLException e) {
             throw new TrinoException(JDBC_ERROR, e);
         }
+    }
+
+    private static Function<String, String> adapt(RemoteQueryModifier modifier, ConnectorSession session)
+    {
+        return query -> modifier.apply(session, query);
     }
 }
