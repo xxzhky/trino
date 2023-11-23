@@ -133,10 +133,8 @@ public class JdbcPageSink
                     .collect(toImmutableList());
         }
 
-        String sinkSql = getSinkSql(jdbcClient, handle, columnWriters);
         try {
-            sinkSql = remoteQueryModifier.apply(sinkSql);
-            statement = connection.prepareStatement(sinkSql);
+            statement = connection.prepareStatement(getSinkSql(jdbcClient, handle, columnWriters));
         }
         catch (TrinoException e) {
             throw closeAllSuppress(e, connection);
@@ -149,7 +147,7 @@ public class JdbcPageSink
 
     protected String getSinkSql(JdbcClient jdbcClient, JdbcOutputTableHandle outputTableHandle, List<WriteFunction> columnWriters)
     {
-        return jdbcClient.buildInsertSql(outputTableHandle, columnWriters);
+        return remoteQueryModifier.apply(jdbcClient.buildInsertSql(outputTableHandle, columnWriters));
     }
 
     @Override
