@@ -13,9 +13,8 @@
  */
 package io.trino.plugin.jdbc.jmx;
 
-import com.google.inject.Inject;
 import io.trino.plugin.jdbc.ConnectionFactory;
-import io.trino.plugin.jdbc.ForBaseJdbc;
+import io.trino.plugin.jdbc.ConnectionFactoryDecorator;
 import io.trino.plugin.jdbc.ForwardingConnectionFactory;
 import io.trino.spi.connector.ConnectorSession;
 import org.weakref.jmx.Managed;
@@ -30,8 +29,7 @@ public class StatisticsAwareConnectionFactory
     private final JdbcApiStats openConnection = new JdbcApiStats();
     private final JdbcApiStats closeConnection = new JdbcApiStats();
 
-    @Inject
-    public StatisticsAwareConnectionFactory(@ForBaseJdbc ConnectionFactory delegate)
+    public StatisticsAwareConnectionFactory(ConnectionFactory delegate)
     {
         super(delegate);
     }
@@ -62,5 +60,21 @@ public class StatisticsAwareConnectionFactory
     public JdbcApiStats getCloseConnection()
     {
         return closeConnection;
+    }
+
+    public static class Decorator
+            implements ConnectionFactoryDecorator
+    {
+        @Override
+        public int getPriority()
+        {
+            return STATISTICS_PRIORITY;
+        }
+
+        @Override
+        public ConnectionFactory decorate(ConnectionFactory delegate)
+        {
+            return new StatisticsAwareConnectionFactory(delegate);
+        }
     }
 }

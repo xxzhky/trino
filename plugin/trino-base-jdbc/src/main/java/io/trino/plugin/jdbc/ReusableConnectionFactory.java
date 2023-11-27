@@ -18,7 +18,6 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.RemovalNotification;
 import com.google.errorprone.annotations.ThreadSafe;
 import com.google.errorprone.annotations.concurrent.GuardedBy;
-import com.google.inject.Inject;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorSession;
 import org.gaul.modernizer_maven_annotations.SuppressModernizer;
@@ -35,15 +34,14 @@ import static java.util.Objects.requireNonNull;
 @ThreadSafe
 public final class ReusableConnectionFactory
         extends ForwardingConnectionFactory
-        implements JdbcQueryEventListener
 {
     @GuardedBy("this")
     private final Cache<String, Connection> connections;
 
-    @Inject
-    public ReusableConnectionFactory(@ForReusableConnectionFactory ConnectionFactory delegate)
+    public ReusableConnectionFactory(ConnectionFactory delegate, DelegatingListener listener)
     {
         this(delegate, Duration.ofSeconds(2), 10);
+        listener.setFactory(this);
     }
 
     ReusableConnectionFactory(ConnectionFactory delegate, Duration duration, long maximumSize)
@@ -99,10 +97,6 @@ public final class ReusableConnectionFactory
         return super.openConnection(session);
     }
 
-    @Override
-    public void beginQuery(ConnectorSession session) {}
-
-    @Override
     public void cleanupQuery(ConnectorSession session)
     {
         Connection connection = connections.asMap().remove(session.getQueryId());
@@ -125,6 +119,30 @@ public final class ReusableConnectionFactory
         }
         connections.invalidateAll();
         super.close();
+    }
+
+    public static class DelegatingListener
+            implements JdbcQueryEventListener
+    {
+        private ReusableConnectionFactory factory;
+
+        public void setFactory(ReusableConnectionFactory factory)
+        {
+            this.factory = requireNonNull(factory, "factory is null");
+        }
+
+        @Override
+        public void beginQuery(ConnectorSession session)
+        {
+            // noop
+        }
+
+        @Override
+        public void cleanupQuery(ConnectorSession session)
+        {
+            checkState(factory != null, "factory was null");
+            factory.cleanupQuery(session);
+        }
     }
 
     final class CachedConnection
@@ -178,6 +196,29 @@ public final class ReusableConnectionFactory
             else if (!delegate.isClosed()) {
                 connections.put(queryId, delegate);
             }
+        }
+    }
+
+    public static class Decorator
+            implements ConnectionFactoryDecorator
+    {
+        private final DelegatingListener listener;
+
+        public Decorator(DelegatingListener listener)
+        {
+            this.listener = requireNonNull(listener, "listener is null");
+        }
+
+        @Override
+        public int getPriority()
+        {
+            return REUSABLE_PRIORITY;
+        }
+
+        @Override
+        public ConnectionFactory decorate(ConnectionFactory delegate)
+        {
+            return new ReusableConnectionFactory(delegate, listener);
         }
     }
 }

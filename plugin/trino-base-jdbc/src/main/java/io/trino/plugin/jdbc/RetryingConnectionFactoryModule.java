@@ -13,21 +13,25 @@
  */
 package io.trino.plugin.jdbc;
 
-import com.google.inject.AbstractModule;
+import com.google.inject.Binder;
 import com.google.inject.Scopes;
+import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.trino.plugin.jdbc.RetryingConnectionFactory.DefaultRetryStrategy;
 import io.trino.plugin.jdbc.RetryingConnectionFactory.RetryStrategy;
 
+import static com.google.inject.multibindings.Multibinder.newSetBinder;
 import static com.google.inject.multibindings.OptionalBinder.newOptionalBinder;
 
 public class RetryingConnectionFactoryModule
-        extends AbstractModule
+        extends AbstractConfigurationAwareModule
 {
     @Override
-    public void configure()
+    public void setup(Binder binder)
     {
-        bind(RetryingConnectionFactory.class).in(Scopes.SINGLETON);
-        newOptionalBinder(binder(), RetryStrategy.class)
+        newSetBinder(binder, ConnectionFactoryDecorator.class)
+                .addBinding()
+                        .to(RetryingConnectionFactory.Decorator.class);
+        newOptionalBinder(binder, RetryStrategy.class)
                 .setDefault()
                 .to(DefaultRetryStrategy.class)
                 .in(Scopes.SINGLETON);

@@ -14,10 +14,9 @@
 package io.trino.plugin.jdbc;
 
 import com.google.inject.Binder;
-import com.google.inject.Key;
-import com.google.inject.Provides;
 import com.google.inject.Scopes;
 import com.google.inject.Singleton;
+import com.google.inject.multibindings.ProvidesIntoSet;
 import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.trino.spi.NodeManager;
 
@@ -29,28 +28,23 @@ public final class ReusableConnectionFactoryModule
     @Override
     protected void setup(Binder binder)
     {
-        binder.bind(ConnectionFactory.class)
-                .annotatedWith(ForReusableConnectionFactory.class)
-                .to(LazyConnectionFactory.class)
-                .in(Scopes.SINGLETON);
-        binder.bind(ReusableConnectionFactory.class).in(Scopes.SINGLETON);
         newSetBinder(binder, JdbcQueryEventListener.class)
                 .addBinding()
-                .to(Key.get(ReusableConnectionFactory.class))
+                .to(ReusableConnectionFactory.DelegatingListener.class)
                 .in(Scopes.SINGLETON);
+
+        binder.bind(ReusableConnectionFactory.DelegatingListener.class)
+                .in(Scopes.SINGLETON); // this will be the same instance as provided into set
     }
 
-    @Provides
+    @ProvidesIntoSet
     @Singleton
-    public static ConnectionFactory getReusableConnectionFactory(
-            NodeManager nodeManager,
-            @ForReusableConnectionFactory ConnectionFactory delegate,
-            ReusableConnectionFactory reusableConnectionFactory)
+    public static ConnectionFactoryDecorator getReusableConnectionFactoryDecorator(NodeManager nodeManager, ReusableConnectionFactory.DelegatingListener listener)
     {
         if (nodeManager.getCurrentNode().isCoordinator()) {
-            return reusableConnectionFactory;
+            return new ReusableConnectionFactory.Decorator(listener);
         }
 
-        return delegate;
+        return ConnectionFactoryDecorator.noop();
     }
 }

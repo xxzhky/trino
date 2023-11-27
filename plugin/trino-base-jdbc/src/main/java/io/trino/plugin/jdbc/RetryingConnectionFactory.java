@@ -18,7 +18,6 @@ import com.google.inject.Inject;
 import dev.failsafe.Failsafe;
 import dev.failsafe.FailsafeException;
 import dev.failsafe.RetryPolicy;
-import io.trino.plugin.jdbc.jmx.StatisticsAwareConnectionFactory;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.ConnectorSession;
 
@@ -35,8 +34,7 @@ public class RetryingConnectionFactory
 {
     private final RetryPolicy<Object> retryPolicy;
 
-    @Inject
-    public RetryingConnectionFactory(StatisticsAwareConnectionFactory delegate, RetryStrategy retryStrategy)
+    public RetryingConnectionFactory(ConnectionFactory delegate, RetryStrategy retryStrategy)
     {
         super(delegate);
         requireNonNull(retryStrategy);
@@ -78,6 +76,30 @@ public class RetryingConnectionFactory
         {
             return Throwables.getCausalChain(exception).stream()
                     .anyMatch(SQLTransientException.class::isInstance);
+        }
+    }
+
+    public static class Decorator
+            implements ConnectionFactoryDecorator
+    {
+        private final RetryStrategy strategy;
+
+        @Inject
+        public Decorator(RetryStrategy strategy)
+        {
+            this.strategy = requireNonNull(strategy, "strategy is null");
+        }
+
+        @Override
+        public int getPriority()
+        {
+            return RETRYING_PRIORITY;
+        }
+
+        @Override
+        public ConnectionFactory decorate(ConnectionFactory delegate)
+        {
+            return new RetryingConnectionFactory(delegate, strategy);
         }
     }
 }

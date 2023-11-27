@@ -30,7 +30,7 @@ public final class LazyConnectionFactory
         extends ForwardingConnectionFactory
 {
     @Inject
-    public LazyConnectionFactory(RetryingConnectionFactory delegate)
+    public LazyConnectionFactory(ConnectionFactory delegate)
     {
         super(delegate);
     }
@@ -84,5 +84,21 @@ public final class LazyConnectionFactory
     {
         T get()
                 throws SQLException;
+    }
+
+    public static class Decorator
+            implements ConnectionFactoryDecorator
+    {
+        @Override
+        public int getPriority()
+        {
+            return 0;
+        }
+
+        @Override
+        public ConnectionFactory decorate(ConnectionFactory delegate)
+        {
+            return new LazyConnectionFactory(delegate);
+        }
     }
 }
