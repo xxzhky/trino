@@ -14,43 +14,40 @@
 package io.trino.plugin.jdbc;
 
 import io.trino.spi.connector.ConnectorSession;
+import jakarta.annotation.PreDestroy;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 
 import static java.util.Objects.requireNonNull;
 
-public final class ConfiguringConnectionFactory
-        extends ForwardingConnectionFactory
+public abstract class ForwardingConnectionFactory
+        implements ConnectionFactory
 {
-    private final Configurator configurator;
+    private final ConnectionFactory delegate;
 
-    public ConfiguringConnectionFactory(ConnectionFactory delegate, Configurator configurator)
+    public ForwardingConnectionFactory(ConnectionFactory delegate)
     {
-        super(delegate);
-        this.configurator = requireNonNull(configurator, "configurator is null");
+        this.delegate = requireNonNull(delegate, "delegate is null");
+    }
+
+    protected ConnectionFactory delegate()
+    {
+        return this.delegate;
     }
 
     @Override
     public Connection openConnection(ConnectorSession session)
             throws SQLException
     {
-        Connection connection = super.openConnection(session);
-        try {
-            configurator.configure(connection);
-        }
-        catch (SQLException | RuntimeException e) {
-            try (connection) {
-                throw e;
-            }
-        }
-        return connection;
+        return delegate.openConnection(session);
     }
 
-    @FunctionalInterface
-    public interface Configurator
+    @Override
+    @PreDestroy
+    public void close()
+            throws SQLException
     {
-        void configure(Connection connection)
-                throws SQLException;
+        delegate.close();
     }
 }

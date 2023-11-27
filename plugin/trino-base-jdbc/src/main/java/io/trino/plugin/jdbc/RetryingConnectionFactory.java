@@ -31,17 +31,15 @@ import static java.time.temporal.ChronoUnit.SECONDS;
 import static java.util.Objects.requireNonNull;
 
 public class RetryingConnectionFactory
-        implements ConnectionFactory
+        extends ForwardingConnectionFactory
 {
     private final RetryPolicy<Object> retryPolicy;
-
-    private final ConnectionFactory delegate;
 
     @Inject
     public RetryingConnectionFactory(StatisticsAwareConnectionFactory delegate, RetryStrategy retryStrategy)
     {
+        super(delegate);
         requireNonNull(retryStrategy);
-        this.delegate = requireNonNull(delegate, "delegate is null");
         this.retryPolicy = RetryPolicy.builder()
                 .withMaxDuration(java.time.Duration.of(30, SECONDS))
                 .withMaxAttempts(5)
@@ -57,7 +55,7 @@ public class RetryingConnectionFactory
     {
         try {
             return Failsafe.with(retryPolicy)
-                    .get(() -> delegate.openConnection(session));
+                    .get(() -> super.openConnection(session));
         }
         catch (FailsafeException ex) {
             if (ex.getCause() instanceof SQLException) {
@@ -65,13 +63,6 @@ public class RetryingConnectionFactory
             }
             throw ex;
         }
-    }
-
-    @Override
-    public void close()
-            throws SQLException
-    {
-        delegate.close();
     }
 
     public interface RetryStrategy
