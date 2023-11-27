@@ -18,6 +18,7 @@ import com.google.inject.Provides;
 import com.google.inject.Singleton;
 import io.airlift.configuration.AbstractConfigurationAwareModule;
 import io.airlift.log.Logger;
+import io.trino.plugin.jdbc.keepalive.KeepAliveModule;
 
 import java.util.Comparator;
 import java.util.List;
@@ -35,6 +36,7 @@ public class ConnectionFactoryModule
     protected void setup(Binder binder)
     {
         install(new RetryingConnectionFactoryModule());
+        install(new KeepAliveModule());
     }
 
     @Provides
