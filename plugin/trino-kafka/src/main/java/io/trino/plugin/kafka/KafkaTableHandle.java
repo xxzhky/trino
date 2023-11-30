@@ -20,14 +20,24 @@ import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorInsertTableHandle;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.SchemaTableName;
+import io.trino.spi.predicate.Domain;
+import io.trino.spi.predicate.SortedRangeSet;
 import io.trino.spi.predicate.TupleDomain;
+import io.trino.spi.predicate.ValueSet;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+import static io.trino.plugin.kafka.KafkaInternalFieldManager.InternalFieldId.PARTITION_ID_FIELD;
+import static io.trino.plugin.kafka.KafkaInternalFieldManager.InternalFieldId.PARTITION_OFFSET_FIELD;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toMap;
 
 public final class KafkaTableHandle
         implements ConnectorTableHandle, ConnectorInsertTableHandle
@@ -55,7 +65,11 @@ public final class KafkaTableHandle
     private final Optional<String> keySubject;
     private final Optional<String> messageSubject;
     private final List<KafkaColumnHandle> columns;
+    private final TupleDomain<ColumnHandle> compactEffectivePredicate;
     private final TupleDomain<ColumnHandle> constraint;
+    private final Map<String, KafkaColumnHandle> predicateColumns;
+    private final boolean rightForPush;
+    private final OptionalLong limit;
 
     @JsonCreator
     public KafkaTableHandle(
@@ -69,7 +83,11 @@ public final class KafkaTableHandle
             @JsonProperty("keySubject") Optional<String> keySubject,
             @JsonProperty("messageSubject") Optional<String> messageSubject,
             @JsonProperty("columns") List<KafkaColumnHandle> columns,
-            @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint)
+            @JsonProperty("compactEffectivePredicate") TupleDomain<ColumnHandle> compactEffectivePredicate,
+            @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
+            @JsonProperty("predicateColumns") Map<String, KafkaColumnHandle> predicateColumns,
+            @JsonProperty("rightForPush") boolean rightForPush,
+            @JsonProperty("limit") OptionalLong limit)
     {
         this.schemaName = requireNonNull(schemaName, "schemaName is null");
         this.tableName = requireNonNull(tableName, "tableName is null");
@@ -81,7 +99,43 @@ public final class KafkaTableHandle
         this.keySubject = requireNonNull(keySubject, "keySubject is null");
         this.messageSubject = requireNonNull(messageSubject, "messageSubject is null");
         this.columns = ImmutableList.copyOf(requireNonNull(columns, "columns is null"));
+        this.compactEffectivePredicate = requireNonNull(compactEffectivePredicate, "constraint is null");
         this.constraint = requireNonNull(constraint, "constraint is null");
+        this.predicateColumns = predicateColumns;
+        this.rightForPush = rightForPush;
+        this.limit = requireNonNull(limit, "constraint is null");
+    }
+
+    public KafkaTableHandle(
+            @JsonProperty("schemaName") String schemaName,
+            @JsonProperty("tableName") String tableName,
+            @JsonProperty("topicName") String topicName,
+            @JsonProperty("keyDataFormat") String keyDataFormat,
+            @JsonProperty("messageDataFormat") String messageDataFormat,
+            @JsonProperty("keyDataSchemaLocation") Optional<String> keyDataSchemaLocation,
+            @JsonProperty("messageDataSchemaLocation") Optional<String> messageDataSchemaLocation,
+            @JsonProperty("keySubject") Optional<String> keySubject,
+            @JsonProperty("messageSubject") Optional<String> messageSubject,
+            @JsonProperty("columns") List<KafkaColumnHandle> columns,
+            @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
+            @JsonProperty("limit") OptionalLong limit)
+    {
+        this(
+                schemaName,
+                tableName,
+                topicName,
+                keyDataFormat,
+                messageDataFormat,
+                keyDataSchemaLocation,
+                messageDataSchemaLocation,
+                keySubject,
+                messageSubject,
+                columns,
+                TupleDomain.all(),
+                constraint,
+                null,
+                false,
+                limit);
     }
 
     @JsonProperty
@@ -150,6 +204,30 @@ public final class KafkaTableHandle
         return constraint;
     }
 
+    @JsonProperty
+    public TupleDomain<ColumnHandle> getCompactEffectivePredicate()
+    {
+        return compactEffectivePredicate;
+    }
+
+    @JsonProperty
+    public Map<String, KafkaColumnHandle> getPredicateColumns()
+    {
+        return predicateColumns;
+    }
+
+    @JsonProperty
+    public boolean isRightForPush()
+    {
+        return rightForPush;
+    }
+
+    @JsonProperty
+    public OptionalLong getLimit()
+    {
+        return limit;
+    }
+
     public SchemaTableName toSchemaTableName()
     {
         return new SchemaTableName(schemaName, tableName);
@@ -169,7 +247,8 @@ public final class KafkaTableHandle
                 keySubject,
                 messageSubject,
                 columns,
-                constraint);
+                constraint,
+                limit);
     }
 
     @Override
@@ -193,7 +272,11 @@ public final class KafkaTableHandle
                 && Objects.equals(this.keySubject, other.keySubject)
                 && Objects.equals(this.messageSubject, other.messageSubject)
                 && Objects.equals(this.columns, other.columns)
-                && Objects.equals(this.constraint, other.constraint);
+                && Objects.equals(this.compactEffectivePredicate, other.compactEffectivePredicate)
+                && Objects.equals(this.constraint, other.constraint)
+                && Objects.equals(this.predicateColumns, other.predicateColumns)
+                && this.rightForPush == other.rightForPush
+                && Objects.equals(this.limit, other.limit);
     }
 
     @Override
@@ -211,6 +294,41 @@ public final class KafkaTableHandle
                 .add("messageSubject", messageSubject)
                 .add("columns", columns)
                 .add("constraint", constraint)
+                .add("limit", limit)
                 .toString();
     }
+
+    public List<KafkaColumnHandle> getRemainingPredicateColumn()
+    {
+        return constraint.getDomains()
+                .orElseGet(HashMap::new)
+                .entrySet().stream()
+                .collect(toMap(e -> (KafkaColumnHandle) e.getKey(), e -> e.getValue()))
+                .entrySet().stream()
+                .filter(kafkaColumnHandleDomainEntry -> {
+                    KafkaColumnHandle columnHandle = kafkaColumnHandleDomainEntry.getKey();
+                    Domain domain = kafkaColumnHandleDomainEntry.getValue();
+                    switch (getFieldByName(columnHandle.getName())) {
+
+                    }
+                    switch () {
+                        case PARTITION_OFFSET_FIELD:
+                            ValueSet valueSet = domain.getValues();
+                            if (!(valueSet instanceof SortedRangeSet) && ((SortedRangeSet)valueSet).getRanges().getRangeCount() == 1) {
+                                return true;
+                            }
+                        case PARTITION_ID_FIELD:
+                            return true;
+                        default:
+                            return false;
+                    }
+                })
+                .map(entity -> entity.getKey())
+                .collect(toImmutableList());
+    }
+
+
+
+
+
 }
