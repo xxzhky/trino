@@ -238,4 +238,9 @@ public class KafkaInternalFieldManager
     {
         return fieldsByIds.get(id);
     }
+
+    public InternalFieldId getInternalFieldId(KafkaColumnHandle columnHandle)
+    {
+        return getFieldByName(columnHandle.getName()).getInternalFieldId();
+    }
 }

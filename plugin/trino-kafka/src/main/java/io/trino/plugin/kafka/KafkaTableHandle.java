@@ -33,9 +33,11 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
+import static com.google.common.base.Predicates.in;
+import static com.google.common.base.Predicates.not;
 import static com.google.common.collect.ImmutableList.toImmutableList;
-import static io.trino.plugin.kafka.KafkaInternalFieldManager.InternalFieldId.PARTITION_ID_FIELD;
-import static io.trino.plugin.kafka.KafkaInternalFieldManager.InternalFieldId.PARTITION_OFFSET_FIELD;
+import static com.google.common.collect.Maps.filterKeys;
+import static io.trino.spi.predicate.TupleDomain.withColumnDomains;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toMap;
 
@@ -298,37 +300,46 @@ public final class KafkaTableHandle
                 .toString();
     }
 
-    public List<KafkaColumnHandle> getRemainingPredicateColumn()
+    public List<KafkaColumnHandle> getRemainingPredicateColumn(final KafkaInternalFieldManager internalFieldManager)
     {
+        // the connector for database does not support discrete range matching(or multiple ranges)
+        // such as a query with the clause "where condition" like "where x in (2, 6) and (y > 7 or y = 7)"
         return constraint.getDomains()
                 .orElseGet(HashMap::new)
                 .entrySet().stream()
                 .collect(toMap(e -> (KafkaColumnHandle) e.getKey(), e -> e.getValue()))
                 .entrySet().stream()
                 .filter(kafkaColumnHandleDomainEntry -> {
-                    KafkaColumnHandle columnHandle = kafkaColumnHandleDomainEntry.getKey();
-                    Domain domain = kafkaColumnHandleDomainEntry.getValue();
-                    switch (getFieldByName(columnHandle.getName())) {
-
-                    }
-                    switch () {
-                        case PARTITION_OFFSET_FIELD:
-                            ValueSet valueSet = domain.getValues();
+                    switch (internalFieldManager.getInternalFieldId(kafkaColumnHandleDomainEntry.getKey())) {
+                        case PARTITION_OFFSET_FIELD -> {
+                            ValueSet valueSet = kafkaColumnHandleDomainEntry.getValue().getValues();
                             if (!(valueSet instanceof SortedRangeSet) && ((SortedRangeSet)valueSet).getRanges().getRangeCount() == 1) {
                                 return true;
                             }
-                        case PARTITION_ID_FIELD:
+                        }
+                        case PARTITION_ID_FIELD -> {
                             return true;
-                        default:
+                        }
+                        default -> {
                             return false;
+                        }
                     }
+                    return false;
                 })
                 .map(entity -> entity.getKey())
                 .collect(toImmutableList());
     }
 
+    public TupleDomain<ColumnHandle> getRemainingFilter(final KafkaInternalFieldManager internalFieldManager)
+    {
+        // filter some unnecessary predicates
+        return TupleDomain.<ColumnHandle>all()
+                .intersect(withColumnDomains(filterKeys(constraint.getDomains().get(), not(in(getRemainingPredicateColumn(internalFieldManager))))));
+    }
 
-
-
-
+    public TupleDomain<ColumnHandle> getEnforcedPredicate(final KafkaInternalFieldManager internalFieldManager)
+    {
+        return TupleDomain.<ColumnHandle>all()
+                .intersect(withColumnDomains(filterKeys(constraint.getDomains().get(), in(getRemainingPredicateColumn(internalFieldManager)))));
+    }
 }
