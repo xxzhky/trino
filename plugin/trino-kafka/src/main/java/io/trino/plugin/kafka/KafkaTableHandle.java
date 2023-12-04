@@ -20,7 +20,6 @@ import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ConnectorInsertTableHandle;
 import io.trino.spi.connector.ConnectorTableHandle;
 import io.trino.spi.connector.SchemaTableName;
-import io.trino.spi.predicate.Domain;
 import io.trino.spi.predicate.SortedRangeSet;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
@@ -67,7 +66,7 @@ public final class KafkaTableHandle
     private final Optional<String> keySubject;
     private final Optional<String> messageSubject;
     private final List<KafkaColumnHandle> columns;
-    private final TupleDomain<ColumnHandle> compactEffectivePredicate;
+    private final TupleDomain<KafkaColumnHandle> compactEffectivePredicate;
     private final TupleDomain<ColumnHandle> constraint;
     private final Map<String, KafkaColumnHandle> predicateColumns;
     private final boolean rightForPush;
@@ -85,7 +84,7 @@ public final class KafkaTableHandle
             @JsonProperty("keySubject") Optional<String> keySubject,
             @JsonProperty("messageSubject") Optional<String> messageSubject,
             @JsonProperty("columns") List<KafkaColumnHandle> columns,
-            @JsonProperty("compactEffectivePredicate") TupleDomain<ColumnHandle> compactEffectivePredicate,
+            @JsonProperty("compactEffectivePredicate") TupleDomain<KafkaColumnHandle> compactEffectivePredicate,
             @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
             @JsonProperty("predicateColumns") Map<String, KafkaColumnHandle> predicateColumns,
             @JsonProperty("rightForPush") boolean rightForPush,
@@ -109,18 +108,18 @@ public final class KafkaTableHandle
     }
 
     public KafkaTableHandle(
-            @JsonProperty("schemaName") String schemaName,
-            @JsonProperty("tableName") String tableName,
-            @JsonProperty("topicName") String topicName,
-            @JsonProperty("keyDataFormat") String keyDataFormat,
-            @JsonProperty("messageDataFormat") String messageDataFormat,
-            @JsonProperty("keyDataSchemaLocation") Optional<String> keyDataSchemaLocation,
-            @JsonProperty("messageDataSchemaLocation") Optional<String> messageDataSchemaLocation,
-            @JsonProperty("keySubject") Optional<String> keySubject,
-            @JsonProperty("messageSubject") Optional<String> messageSubject,
-            @JsonProperty("columns") List<KafkaColumnHandle> columns,
-            @JsonProperty("constraint") TupleDomain<ColumnHandle> constraint,
-            @JsonProperty("limit") OptionalLong limit)
+            String schemaName,
+            String tableName,
+            String topicName,
+            String keyDataFormat,
+            String messageDataFormat,
+            Optional<String> keyDataSchemaLocation,
+            Optional<String> messageDataSchemaLocation,
+            Optional<String> keySubject,
+            Optional<String> messageSubject,
+            List<KafkaColumnHandle> columns,
+            TupleDomain<ColumnHandle> constraint,
+            OptionalLong limit)
     {
         this(
                 schemaName,
@@ -207,7 +206,7 @@ public final class KafkaTableHandle
     }
 
     @JsonProperty
-    public TupleDomain<ColumnHandle> getCompactEffectivePredicate()
+    public TupleDomain<KafkaColumnHandle> getCompactEffectivePredicate()
     {
         return compactEffectivePredicate;
     }

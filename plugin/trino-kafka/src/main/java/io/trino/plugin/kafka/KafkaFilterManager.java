@@ -93,7 +93,7 @@ public class KafkaFilterManager
         requireNonNull(partitionEndOffsets, "partitionEndOffsets is null");
 
         TupleDomain<ColumnHandle> constraint = kafkaTableHandle.getConstraint();
-        TupleDomain<ColumnHandle> effectivePredicate = kafkaTableHandle.getCompactEffectivePredicate();
+        TupleDomain<KafkaColumnHandle> effectivePredicate = kafkaTableHandle.getCompactEffectivePredicate();
         verify(!effectivePredicate.isNone(), "effectivePredicate is none");
 
         if (kafkaTableHandle.isRightForPush() && !effectivePredicate.isAll()) {
@@ -116,7 +116,7 @@ public class KafkaFilterManager
 
     private KafkaFilteringResult buildFilterResult(ConnectorSession session,
                                                    KafkaTableHandle kafkaTableHandle,
-                                                   TupleDomain<ColumnHandle> predicate,
+                                                   TupleDomain<KafkaColumnHandle> predicate,
                                                    List<PartitionInfo> partitionInfos,
                                                    Map<TopicPartition, Long> partitionBeginOffsets,
                                                    Map<TopicPartition, Long> partitionEndOffsets)

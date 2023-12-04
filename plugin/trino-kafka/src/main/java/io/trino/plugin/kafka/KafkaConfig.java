@@ -48,6 +48,8 @@ public class KafkaConfig
     private boolean hideInternalColumns = true;
     private int messagesPerSplit = 100_000;
     private boolean timestampUpperBoundPushDownEnabled;
+    private int domainCompactionThreshold = 1_000;
+    private boolean predicateForcePushDownEnabled = true;
     private String tableDescriptionSupplier = FileTableDescriptionSupplier.NAME;
     private List<File> resourceConfigFiles = ImmutableList.of();
     private String internalFieldPrefix = "_";
@@ -158,6 +160,29 @@ public class KafkaConfig
     {
         this.timestampUpperBoundPushDownEnabled = timestampUpperBoundPushDownEnabled;
         return this;
+    }
+
+    @Min(1)
+    public int getDomainCompactionThreshold()
+    {
+        return domainCompactionThreshold;
+    }
+
+    @Config("kafka.domain-compaction-threshold")
+    @ConfigDescription("Maximum ranges to allow in a tuple domain without compacting it")
+    public void setDomainCompactionThreshold(int domainCompactionThreshold)
+    {
+        this.domainCompactionThreshold = domainCompactionThreshold;
+    }
+
+    public boolean isPredicateForcePushDownEnabled() {
+        return predicateForcePushDownEnabled;
+    }
+
+    @Config("kafka.predicate-force-push-down-enabled")
+    @ConfigDescription("predicate force pushing down enabled")
+    public void setPredicateForcePushDownEnabled(boolean predicateForcePushDownEnabled) {
+        this.predicateForcePushDownEnabled = predicateForcePushDownEnabled;
     }
 
     @NotNull

@@ -21,19 +21,29 @@ import io.trino.spi.session.PropertyMetadata;
 
 import java.util.List;
 
+import static io.trino.spi.session.PropertyMetadata.booleanProperty;
+
 public final class KafkaSessionProperties
         implements SessionPropertiesProvider
 {
     private static final String TIMESTAMP_UPPER_BOUND_FORCE_PUSH_DOWN_ENABLED = "timestamp_upper_bound_force_push_down_enabled";
+    private static final String PREDICATE_FORCE_PUSH_DOWN_ENABLED = "predicate_force_push_down_enabled";
     private final List<PropertyMetadata<?>> sessionProperties;
 
     @Inject
     public KafkaSessionProperties(KafkaConfig kafkaConfig)
     {
-        sessionProperties = ImmutableList.of(PropertyMetadata.booleanProperty(
-                TIMESTAMP_UPPER_BOUND_FORCE_PUSH_DOWN_ENABLED,
-                "Enable or disable timestamp upper bound push down for topic createTime mode",
-                kafkaConfig.isTimestampUpperBoundPushDownEnabled(), false));
+        sessionProperties = ImmutableList.of(
+                booleanProperty(
+                        TIMESTAMP_UPPER_BOUND_FORCE_PUSH_DOWN_ENABLED,
+                        "Enable or disable timestamp upper bound push down for topic createTime mode",
+                        kafkaConfig.isTimestampUpperBoundPushDownEnabled(),
+                        false),
+                booleanProperty(
+                        PREDICATE_FORCE_PUSH_DOWN_ENABLED,
+                        "Enable or disable timestamp upper bound push down for topic createTime mode",
+                        kafkaConfig.isPredicateForcePushDownEnabled(),
+                        false));
     }
 
     @Override
@@ -52,5 +62,15 @@ public final class KafkaSessionProperties
     public static boolean isTimestampUpperBoundPushdownEnabled(ConnectorSession session)
     {
         return session.getProperty(TIMESTAMP_UPPER_BOUND_FORCE_PUSH_DOWN_ENABLED, Boolean.class);
+    }
+
+    /**
+     * By default, it supports predicate push-down.
+     * Push-down can be disabled via ``kafka.predicate-force-push-down-enabled`` config prop
+     * or ``kafka.predicate_force_push_down_enabled`` session prop.
+     */
+    public static boolean isPredicatePushDownEnabled(ConnectorSession session)
+    {
+        return session.getProperty(PREDICATE_FORCE_PUSH_DOWN_ENABLED, Boolean.class);
     }
 }
