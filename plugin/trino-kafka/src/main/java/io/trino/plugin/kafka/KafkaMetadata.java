@@ -40,6 +40,7 @@ import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.statistics.ComputedStatistics;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +60,6 @@ import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
 import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
-import static java.util.stream.Stream.builder;
 import static java.util.stream.Stream.concat;
 
 /**
@@ -274,7 +274,7 @@ public class KafkaMetadata
     public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session, ConnectorTableHandle table, Constraint constraint)
     {
         KafkaTableHandle handle = (KafkaTableHandle) table;
-        //
+        // some effective/unforced tuple sitting in the table handle included, and it does work
         TupleDomain<ColumnHandle> effectivePredicate = constraint.getSummary().intersect(handle.getConstraint());
         TupleDomain<KafkaColumnHandle> compactEffectivePredicate = toCompactTupleDomain(effectivePredicate, domainCompactionThreshold);
         KafkaTableHandle newHandle = new KafkaTableHandle(
@@ -313,29 +313,66 @@ public class KafkaMetadata
             isRightForPush = checkIfPossibleToPush(newEffectivePredicate.getDomains().get().keySet());
         }
 
+        // Get the column handle
+        Map<String, ColumnHandle> columnHandles = getColumnHandles(session, table);
 
-        TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
-        TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(constraint.getSummary());
-        if (oldDomain.equals(newDomain)) {
+        //map predicate columns to kafka column handles
+        Map<String, KafkaColumnHandle> predicateColumns = predicateColumnNames.stream()
+                .map(columnHandles::get)
+                .map(KafkaColumnHandle.class::cast)
+                .collect(toImmutableMap(KafkaColumnHandle::getName, identity()));
+
+        List<TupleDomain<KafkaColumnHandle>> newEffectivePredicates = ImmutableList.of();
+        newHandle = new KafkaTableHandle(
+                newHandle.getSchemaName(),
+                newHandle.getTableName(),
+                newHandle.getTopicName(),
+                newHandle.getKeyDataFormat(),
+                newHandle.getMessageDataFormat(),
+                newHandle.getKeyDataSchemaLocation(),
+                newHandle.getMessageDataSchemaLocation(),
+                newHandle.getKeySubject(),
+                newHandle.getMessageSubject(),
+                newHandle.getColumns(),
+                compactEffectivePredicate,
+                effectivePredicate,
+                predicateColumns,
+                isRightForPush,
+                newHandle.getLimit());
+
+        if (handle.getCompactEffectivePredicate().equals(newHandle.getCompactEffectivePredicate())) {
             return Optional.empty();
         }
 
-        handle = new KafkaTableHandle(
-                handle.getSchemaName(),
-                handle.getTableName(),
-                handle.getTopicName(),
-                handle.getKeyDataFormat(),
-                handle.getMessageDataFormat(),
-                handle.getKeyDataSchemaLocation(),
-                handle.getMessageDataSchemaLocation(),
-                handle.getKeySubject(),
-                handle.getMessageSubject(),
-                handle.getColumns(),
-                TupleDomain.all(),
-                newDomain,
-                handle.getPredicateColumns(),
-                handle.isRightForPush(),
-                handle.getLimit());
+        if (isRightForPush) {
+            // Push
+            TupleDomain<ColumnHandle> remainingFilter = newHandle.getRemainingFilter(kafkaInternalFieldManager);
+            return Optional.of(new ConstraintApplicationResult<>(newHandle, remainingFilter, false));
+        }
+
+
+//        TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
+//        TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(constraint.getSummary());
+//        if (oldDomain.equals(newDomain)) {
+//            return Optional.empty();
+//        }
+//
+//        handle = new KafkaTableHandle(
+//                handle.getSchemaName(),
+//                handle.getTableName(),
+//                handle.getTopicName(),
+//                handle.getKeyDataFormat(),
+//                handle.getMessageDataFormat(),
+//                handle.getKeyDataSchemaLocation(),
+//                handle.getMessageDataSchemaLocation(),
+//                handle.getKeySubject(),
+//                handle.getMessageSubject(),
+//                handle.getColumns(),
+//                TupleDomain.all(),
+//                newDomain,
+//                handle.getPredicateColumns(),
+//                handle.isRightForPush(),
+//                handle.getLimit());
 
         return Optional.of(new ConstraintApplicationResult<>(handle, constraint.getSummary(), false));
     }
