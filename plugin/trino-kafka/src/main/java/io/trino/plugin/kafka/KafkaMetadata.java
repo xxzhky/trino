@@ -31,6 +31,7 @@ import io.trino.spi.connector.ConnectorTableMetadata;
 import io.trino.spi.connector.ConnectorTableProperties;
 import io.trino.spi.connector.Constraint;
 import io.trino.spi.connector.ConstraintApplicationResult;
+import io.trino.spi.connector.LimitApplicationResult;
 import io.trino.spi.connector.RetryMode;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.connector.SchemaTablePrefix;
@@ -40,7 +41,6 @@ import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.statistics.ComputedStatistics;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +56,9 @@ import static com.google.common.collect.ImmutableMap.toImmutableMap;
 import static io.trino.spi.StandardErrorCode.DUPLICATE_COLUMN_NAME;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.connector.RetryMode.NO_RETRIES;
+import static io.trino.spi.predicate.TupleDomain.all;
+import static io.trino.spi.predicate.TupleDomain.none;
+import static io.trino.spi.predicate.TupleDomain.withColumnDomains;
 import static java.util.Objects.requireNonNull;
 import static java.util.function.Function.identity;
 import static java.util.stream.Collectors.toMap;
@@ -112,7 +115,7 @@ public class KafkaMetadata
                         getColumnHandles(session, schemaTableName).values().stream()
                                 .map(KafkaColumnHandle.class::cast)
                                 .collect(toImmutableList()),
-                        TupleDomain.all(),
+                        all(),
                         OptionalLong.empty()))
                 .orElse(null);
     }
@@ -136,20 +139,20 @@ public class KafkaMetadata
                 builder.put((KafkaColumnHandle) columnHandle, domain.simplify(threshold));
             });
         });
-        return TupleDomain.withColumnDomains(builder.build());
+        return withColumnDomains(builder.build());
     }
 
     public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle tableHandle)
     {
         KafkaTableHandle table = (KafkaTableHandle) tableHandle;
 
-        TupleDomain<ColumnHandle> predicate = TupleDomain.all();
+        TupleDomain<ColumnHandle> predicate = all();
         if (table.isRightForPush()) {
             ImmutableMap.Builder<ColumnHandle, Domain> pushedDown = ImmutableMap.builder();
             pushedDown.putAll(table.getEnforcedPredicate(kafkaInternalFieldManager).getDomains()
                     .get().entrySet().stream()
                     .collect(Collectors.toMap(e -> (KafkaColumnHandle) e.getKey(), e -> e.getValue())));
-            predicate = predicate.intersect(TupleDomain.withColumnDomains(pushedDown.build()));
+            predicate = predicate.intersect(withColumnDomains(pushedDown.build()));
         }
 
         return new ConnectorTableProperties(
@@ -300,7 +303,7 @@ public class KafkaMetadata
 
         TupleDomain<KafkaColumnHandle> newEffectivePredicate = newHandle.getCompactEffectivePredicate()
                 .intersect(handle.getCompactEffectivePredicate())
-                .intersect(TupleDomain.withColumnDomains(pushedDown.build()));
+                .intersect(withColumnDomains(pushedDown.build()));
 
         // Get list of all columns involved in predicate
         Set<String> predicateColumnNames = new HashSet<>();
@@ -312,7 +315,6 @@ public class KafkaMetadata
         if (KafkaSessionProperties.isPredicatePushDownEnabled(session)){
             isRightForPush = checkIfPossibleToPush(newEffectivePredicate.getDomains().get().keySet());
         }
-
         // Get the column handle
         Map<String, ColumnHandle> columnHandles = getColumnHandles(session, table);
 
@@ -322,7 +324,6 @@ public class KafkaMetadata
                 .map(KafkaColumnHandle.class::cast)
                 .collect(toImmutableMap(KafkaColumnHandle::getName, identity()));
 
-        List<TupleDomain<KafkaColumnHandle>> newEffectivePredicates = ImmutableList.of();
         newHandle = new KafkaTableHandle(
                 newHandle.getSchemaName(),
                 newHandle.getTableName(),
@@ -344,12 +345,16 @@ public class KafkaMetadata
             return Optional.empty();
         }
 
+        boolean isFullPushDown;
         if (isRightForPush) {
-            // Push
+            // Filter some unnecessary columns
             TupleDomain<ColumnHandle> remainingFilter = newHandle.getRemainingFilter(kafkaInternalFieldManager);
-            return Optional.of(new ConstraintApplicationResult<>(newHandle, remainingFilter, false));
+            isFullPushDown = remainingFilter.isAll();
+            // All predicates might be pushed down at this time, except for the special columns that don't support at right now.
+            // e.g. _message*
+            // discrete range matching for a query like: where x in (1, 6)
+            return Optional.of(new ConstraintApplicationResult<>(newHandle, isFullPushDown ? all() : remainingFilter, false));
         }
-
 
 //        TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
 //        TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(constraint.getSummary());
@@ -374,7 +379,36 @@ public class KafkaMetadata
 //                handle.isRightForPush(),
 //                handle.getLimit());
 
-        return Optional.of(new ConstraintApplicationResult<>(handle, constraint.getSummary(), false));
+        return Optional.of(new ConstraintApplicationResult<>(handle, effectivePredicate, false));
+    }
+
+    @Override
+    public Optional<LimitApplicationResult<ConnectorTableHandle>> applyLimit(ConnectorSession session, ConnectorTableHandle table, long limit)
+    {
+        KafkaTableHandle handle = (KafkaTableHandle) table;
+
+        if (handle.getLimit().isPresent() && handle.getLimit().getAsLong() <= limit) {
+            return Optional.empty();
+        }
+
+        handle = new KafkaTableHandle(
+                handle.getSchemaName(),
+                handle.getTableName(),
+                handle.getTopicName(),
+                handle.getKeyDataFormat(),
+                handle.getMessageDataFormat(),
+                handle.getKeyDataSchemaLocation(),
+                handle.getMessageDataSchemaLocation(),
+                handle.getKeySubject(),
+                handle.getMessageSubject(),
+                handle.getColumns(),
+                handle.getCompactEffectivePredicate(),
+                handle.getConstraint(),
+                handle.getPredicateColumns(),
+                handle.isRightForPush(),
+                OptionalLong.of(limit));
+
+        return Optional.of(new LimitApplicationResult<>(handle, true,true));
     }
 
     private boolean checkIfPossibleToPush(Set<KafkaColumnHandle> columnHandles) {
@@ -417,7 +451,7 @@ public class KafkaMetadata
                 table.getKeySubject(),
                 table.getMessageSubject(),
                 actualColumns,
-                TupleDomain.none(),
+                none(),
                 table.getLimit());
     }
 

@@ -60,6 +60,11 @@ public class Range
         return partitions.build();
     }
 
+    public Range slice(long startPos, int rangeSize)
+    {
+        return new Range(startPos, min(rangeSize + startPos, end));
+    }
+
     @Override
     public String toString()
     {
