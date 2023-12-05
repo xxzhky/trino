@@ -175,13 +175,15 @@ public class KafkaConfig
         this.domainCompactionThreshold = domainCompactionThreshold;
     }
 
-    public boolean isPredicateForcePushDownEnabled() {
+    public boolean isPredicateForcePushDownEnabled()
+    {
         return predicateForcePushDownEnabled;
     }
 
     @Config("kafka.predicate-force-push-down-enabled")
     @ConfigDescription("predicate force pushing down enabled")
-    public void setPredicateForcePushDownEnabled(boolean predicateForcePushDownEnabled) {
+    public void setPredicateForcePushDownEnabled(boolean predicateForcePushDownEnabled)
+    {
         this.predicateForcePushDownEnabled = predicateForcePushDownEnabled;
     }
 

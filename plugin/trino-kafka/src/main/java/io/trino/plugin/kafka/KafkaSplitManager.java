@@ -96,7 +96,8 @@ public class KafkaSplitManager
                 TopicPartition topicPartition = toTopicPartition(partitionInfo);
                 HostAddress leader = HostAddress.fromParts(partitionInfo.leader().host(), partitionInfo.leader().port());
 
-                class RangeToRepartition {
+                class RangeToRepartition
+                {
                     private int partitionSize;
                     private OptionalLong limit;
 
@@ -105,8 +106,7 @@ public class KafkaSplitManager
                         this.limit = kafkaTableHandle.getLimit().isPresent() ? kafkaTableHandle.getLimit() : OptionalLong.empty();
                     }
 
-                    public RangeToRepartition() {
-                    }
+                    public RangeToRepartition() {}
 
                     public RangeToRepartition(int partitionSize)
                     {
@@ -143,11 +143,13 @@ public class KafkaSplitManager
                                    limit));
                     }
 
-                    public int getPartitionSize() {
+                    public int getPartitionSize()
+                    {
                         return partitionSize;
                     }
 
-                    public RangeToRepartition setPartitionSize(int partitionSize) {
+                    public RangeToRepartition setPartitionSize(int partitionSize)
+                    {
                         this.partitionSize = partitionSize;
                         return this;
                     }

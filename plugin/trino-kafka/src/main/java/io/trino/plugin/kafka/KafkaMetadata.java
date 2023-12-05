@@ -141,7 +141,7 @@ public class KafkaMetadata
                 builder.put((KafkaColumnHandle) columnHandle, domain.simplify(threshold));
             });
         });
-        return withColumnDomains(builder.build());
+        return withColumnDomains(builder.buildOrThrow());
     }
 
     public ConnectorTableProperties getTableProperties(ConnectorSession session, ConnectorTableHandle tableHandle)
@@ -154,7 +154,7 @@ public class KafkaMetadata
             pushedDown.putAll(table.getEnforcedPredicate(kafkaInternalFieldManager).getDomains()
                     .get().entrySet().stream()
                     .collect(Collectors.toMap(e -> (KafkaColumnHandle) e.getKey(), e -> e.getValue())));
-            predicate = predicate.intersect(withColumnDomains(pushedDown.build()));
+            predicate = predicate.intersect(withColumnDomains(pushedDown.buildOrThrow()));
         }
 
         return new ConnectorTableProperties(
@@ -307,7 +307,7 @@ public class KafkaMetadata
 
         TupleDomain<KafkaColumnHandle> newEffectivePredicate = newHandle.getCompactEffectivePredicate()
                 .intersect(handle.getCompactEffectivePredicate())
-                .intersect(withColumnDomains(pushedDown.build()));
+                .intersect(withColumnDomains(pushedDown.buildOrThrow()));
 
         // Get list of all columns involved in predicate
         Set<String> predicateColumnNames = new HashSet<>();
@@ -316,7 +316,7 @@ public class KafkaMetadata
                 .forEach(predicateColumnNames::add);
 
         boolean isRightForPush = false;
-        if (KafkaSessionProperties.isPredicatePushDownEnabled(session)){
+        if (KafkaSessionProperties.isPredicatePushDownEnabled(session)) {
             isRightForPush = checkIfPossibleToPush(newEffectivePredicate.getDomains().get().keySet());
         }
         // Get the column handle
@@ -412,10 +412,11 @@ public class KafkaMetadata
                 handle.isRightForPush(),
                 OptionalLong.of(limit));
 
-        return Optional.of(new LimitApplicationResult<>(handle, true,true));
+        return Optional.of(new LimitApplicationResult<>(handle, true, true));
     }
 
-    private boolean checkIfPossibleToPush(Set<KafkaColumnHandle> columnHandles) {
+    private boolean checkIfPossibleToPush(Set<KafkaColumnHandle> columnHandles)
+    {
         // Check if possible to push-down.
         return columnHandles.stream().allMatch(KafkaColumnHandle::isInternal);
     }

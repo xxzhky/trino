@@ -312,7 +312,7 @@ public final class KafkaTableHandle
                     switch (internalFieldManager.getInternalFieldId(kafkaColumnHandleDomainEntry.getKey())) {
                         case PARTITION_OFFSET_FIELD -> {
                             ValueSet valueSet = kafkaColumnHandleDomainEntry.getValue().getValues();
-                            if (!(valueSet instanceof SortedRangeSet) && ((SortedRangeSet)valueSet).getRanges().getRangeCount() == 1) {
+                            if (!(valueSet instanceof SortedRangeSet) && ((SortedRangeSet) valueSet).getRanges().getRangeCount() == 1) {
                                 return true;
                             }
                         }
