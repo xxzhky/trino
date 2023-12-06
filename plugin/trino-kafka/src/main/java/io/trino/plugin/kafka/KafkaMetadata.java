@@ -281,6 +281,9 @@ public class KafkaMetadata
         KafkaTableHandle handle = (KafkaTableHandle) table;
         ConstraintExtractor.ExtractionResult extractionResult = extractTupleDomain(constraint);
         ConnectorExpression connectorExpression = extractionResult.remainingExpression();
+        if (extractionResult.tupleDomain().isAll() && constraint.getPredicateColumns().isEmpty()) {
+            return Optional.empty();
+        }
         // some effective/unforced tuple sitting in the table handle included, and it does work
         TupleDomain<ColumnHandle> effectivePredicate = constraint.getSummary().intersect(handle.getConstraint());
         TupleDomain<KafkaColumnHandle> compactEffectivePredicate = toCompactTupleDomain(effectivePredicate, domainCompactionThreshold);
