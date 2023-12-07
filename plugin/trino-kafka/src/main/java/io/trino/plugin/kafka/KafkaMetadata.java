@@ -360,7 +360,7 @@ public class KafkaMetadata
             // All predicates might be pushed down at this time, except for the special columns that don't support at right now.
             // e.g. _message*
             // discrete range matching for a query like: where x in (1, 6)
-            return Optional.of(new ConstraintApplicationResult<>(newHandle, isFullPushDown ? all() : remainingFilter, false));
+            return Optional.of(new ConstraintApplicationResult<>(newHandle, isFullPushDown ? all() : remainingFilter, connectorExpression, false));
         }
 
 //        TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
@@ -386,7 +386,7 @@ public class KafkaMetadata
 //                handle.isRightForPush(),
 //                handle.getLimit());
 
-        return Optional.of(new ConstraintApplicationResult<>(handle, effectivePredicate, false));
+        return Optional.of(new ConstraintApplicationResult<>(handle, effectivePredicate, connectorExpression, false));
     }
 
     @Override
