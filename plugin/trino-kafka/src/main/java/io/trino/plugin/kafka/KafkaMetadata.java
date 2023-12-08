@@ -279,7 +279,7 @@ public class KafkaMetadata
     public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session, ConnectorTableHandle table, Constraint constraint)
     {
         KafkaTableHandle handle = (KafkaTableHandle) table;
-        ConstraintExtractor.ExtractionResult extractionResult = extractTupleDomain(constraint);
+        ConstraintExtractor.ExtractionResult extractionResult = extractTupleDomain(constraint, (ColumnTypeProvider<KafkaColumnHandle>) column -> column.getType());
         ConnectorExpression connectorExpression = extractionResult.remainingExpression();
         if (extractionResult.tupleDomain().isAll() && constraint.getPredicateColumns().isEmpty()) {
             return Optional.empty();

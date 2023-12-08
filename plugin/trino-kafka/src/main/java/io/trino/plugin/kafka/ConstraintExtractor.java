@@ -62,17 +62,17 @@ import static java.time.ZoneOffset.UTC;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
-public final class ConstraintExtractor
+public final class ConstraintExtractor<C>
 {
     private ConstraintExtractor() {}
 
-    public static ExtractionResult extractTupleDomain(Constraint constraint)
+    public static <C> ExtractionResult extractTupleDomain(Constraint constraint, ColumnTypeProvider<C> columnTypeProvider)
     {
-        TupleDomain<KafkaColumnHandle> result = constraint.getSummary()
-                .transformKeys(KafkaColumnHandle.class::cast);
+        TupleDomain<C> result = constraint.getSummary()
+                .transformKeys(key -> (C) key);
         ImmutableList.Builder<ConnectorExpression> remainingExpressions = ImmutableList.builder();
         for (ConnectorExpression conjunct : extractConjuncts(constraint.getExpression())) {
-            Optional<TupleDomain<KafkaColumnHandle>> converted = toTupleDomain(conjunct, constraint.getAssignments());
+            Optional<TupleDomain<C>> converted = toTupleDomain(conjunct, constraint.getAssignments(), columnTypeProvider);
             if (converted.isEmpty()) {
                 remainingExpressions.add(conjunct);
             }
@@ -86,15 +86,15 @@ public final class ConstraintExtractor
         return new ExtractionResult(result, and(remainingExpressions.build()));
     }
 
-    private static Optional<TupleDomain<KafkaColumnHandle>> toTupleDomain(ConnectorExpression expression, Map<String, ColumnHandle> assignments)
+    private static <C> Optional<TupleDomain<C>> toTupleDomain(ConnectorExpression expression, Map<String, ColumnHandle> assignments, ColumnTypeProvider<C> columnTypeProvider)
     {
         if (expression instanceof Call call) {
-            return toTupleDomain(call, assignments);
+            return toTupleDomain(call, assignments, columnTypeProvider);
         }
         return Optional.empty();
     }
 
-    private static Optional<TupleDomain<KafkaColumnHandle>> toTupleDomain(Call call, Map<String, ColumnHandle> assignments)
+    private static <C> Optional<TupleDomain<C>> toTupleDomain(Call call, Map<String, ColumnHandle> assignments, ColumnTypeProvider<C> columnTypeProvider)
     {
         if (call.getArguments().size() == 2) {
             ConnectorExpression firstArgument = call.getArguments().get(0);
@@ -110,7 +110,8 @@ public final class ConstraintExtractor
                         call.getFunctionName(),
                         getOnlyElement(firstAsCall.getArguments()),
                         constant,
-                        assignments);
+                        assignments,
+                        columnTypeProvider);
             }
 
             if (firstArgument instanceof Call firstAsCall &&
@@ -124,7 +125,8 @@ public final class ConstraintExtractor
                         unit,
                         firstAsCall.getArguments().get(1),
                         constant,
-                        assignments);
+                        assignments,
+                        columnTypeProvider);
             }
 
             if (firstArgument instanceof Call firstAsCall &&
@@ -138,19 +140,21 @@ public final class ConstraintExtractor
                         call.getFunctionName(),
                         getOnlyElement(firstAsCall.getArguments()),
                         constant,
-                        assignments);
+                        assignments,
+                        columnTypeProvider);
             }
         }
 
         return Optional.empty();
     }
 
-    private static Optional<TupleDomain<KafkaColumnHandle>> unwrapCastInComparison(
+    private static <C> Optional<TupleDomain<C>> unwrapCastInComparison(
             // upon invocation, we don't know if this really is a comparison
             FunctionName functionName,
             ConnectorExpression castSource,
             Constant constant,
-            Map<String, ColumnHandle> assignments)
+            Map<String, ColumnHandle> assignments,
+            ColumnTypeProvider<C> columnTypeProvider)
     {
         if (!(castSource instanceof Variable sourceVariable)) {
             // Engine unwraps casts in comparisons in UnwrapCastInComparison. Within a connector we can do more than
@@ -164,13 +168,14 @@ public final class ConstraintExtractor
             return Optional.empty();
         }
 
-        KafkaColumnHandle column = resolve(sourceVariable, assignments);
-        if (column.getType() instanceof TimestampWithTimeZoneType sourceType) {
+        C column = resolve(sourceVariable, assignments);
+        Type type = columnTypeProvider.getType(column);
+        if (type instanceof TimestampWithTimeZoneType sourceType) {
             // Iceberg supports only timestamp(6) with time zone
-            checkArgument(sourceType.getPrecision() == 6, "Unexpected type: %s", column.getType());
+            checkArgument(sourceType.getPrecision() == 6, "Unexpected type: %s", type);
 
             if (constant.getType() == DateType.DATE) {
-                return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue())
+                return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
                         .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
             }
             // TODO support timestamp constant
@@ -179,9 +184,10 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
-    private static Optional<Domain> unwrapTimestampTzToDateCast(KafkaColumnHandle column, FunctionName functionName, long date)
+    private static <C> Optional<Domain> unwrapTimestampTzToDateCast(C column, FunctionName functionName, long date, ColumnTypeProvider<C> columnTypeProvider)
     {
-        Type type = column.getType();
+        //Type type = column.getType();
+        Type type = columnTypeProvider.getType(column);
         checkArgument(type.equals(TIMESTAMP_TZ_MICROS), "Column of unexpected type %s: %s", type, column);
 
         // Verify no overflow. Date values must be in integer range.
@@ -195,7 +201,7 @@ public final class ConstraintExtractor
         return createDomain(functionName, type, startOfDate, startOfNextDate);
     }
 
-    private static Optional<Domain> unwrapYearInTimestampTzComparison(FunctionName functionName, Type type, Constant constant)
+    private static <C> Optional<Domain> unwrapYearInTimestampTzComparison(FunctionName functionName, Type type, Constant constant)
     {
         checkArgument(constant.getValue() != null, "Unexpected constant: %s", constant);
         checkArgument(type.equals(TIMESTAMP_TZ_MICROS), "Unexpected type: %s", type);
@@ -237,13 +243,14 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
-    private static Optional<TupleDomain<KafkaColumnHandle>> unwrapDateTruncInComparison(
+    private static <C> Optional<TupleDomain<C>> unwrapDateTruncInComparison(
             // upon invocation, we don't know if this really is a comparison
             FunctionName functionName,
             Constant unit,
             ConnectorExpression dateTruncSource,
             Constant constant,
-            Map<String, ColumnHandle> assignments)
+            Map<String, ColumnHandle> assignments,
+            ColumnTypeProvider<C> columnTypeProvider)
     {
         if (!(dateTruncSource instanceof Variable sourceVariable)) {
             // Engine unwraps date_trunc in comparisons in UnwrapDateTruncInComparison. Within a connector we can do more than
@@ -261,10 +268,11 @@ public final class ConstraintExtractor
             return Optional.empty();
         }
 
-        KafkaColumnHandle column = resolve(sourceVariable, assignments);
-        if (column.getType() instanceof TimestampWithTimeZoneType type) {
+        C column = resolve(sourceVariable, assignments);
+        Type t = columnTypeProvider.getType(column);
+        if (t instanceof TimestampWithTimeZoneType type) {
             // Iceberg supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", column.getType());
+            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", t);
             verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
 
             return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)
@@ -352,12 +360,13 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
-    private static Optional<TupleDomain<KafkaColumnHandle>> unwrapYearInTimestampTzComparison(
+    private static <C> Optional<TupleDomain<C>> unwrapYearInTimestampTzComparison(
             // upon invocation, we don't know if this really is a comparison
             FunctionName functionName,
             ConnectorExpression yearSource,
             Constant constant,
-            Map<String, ColumnHandle> assignments)
+            Map<String, ColumnHandle> assignments,
+            ColumnTypeProvider<C> columnTypeProvider)
     {
         if (!(yearSource instanceof Variable sourceVariable)) {
             // Engine unwraps year in comparisons in UnwrapYearInComparison. Within a connector we can do more than
@@ -371,10 +380,11 @@ public final class ConstraintExtractor
             return Optional.empty();
         }
 
-        KafkaColumnHandle column = resolve(sourceVariable, assignments);
-        if (column.getType() instanceof TimestampWithTimeZoneType type) {
+        C column = resolve(sourceVariable, assignments);
+        Type columnType = columnTypeProvider.getType(column);
+        if (columnType instanceof TimestampWithTimeZoneType type) {
             // Iceberg supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", column.getType());
+            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
 
             return unwrapYearInTimestampTzComparison(functionName, type, constant)
                     .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
@@ -383,14 +393,14 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
-    private static KafkaColumnHandle resolve(Variable variable, Map<String, ColumnHandle> assignments)
+    private static <C> C resolve(Variable variable, Map<String, ColumnHandle> assignments)
     {
         ColumnHandle columnHandle = assignments.get(variable.getName());
         checkArgument(columnHandle != null, "No assignment for %s", variable);
-        return (KafkaColumnHandle) columnHandle;
+        return (C) columnHandle;
     }
 
-    public record ExtractionResult(TupleDomain<KafkaColumnHandle> tupleDomain, ConnectorExpression remainingExpression)
+    public record ExtractionResult(TupleDomain tupleDomain, ConnectorExpression remainingExpression)
     {
         public ExtractionResult
         {
