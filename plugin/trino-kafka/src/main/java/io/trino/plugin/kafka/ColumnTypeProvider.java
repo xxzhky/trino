@@ -13,9 +13,32 @@
  */
 package io.trino.plugin.kafka;
 
+import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.type.Type;
 
+/**
+ * The ColumnTypeProvider interface is responsible for providing type information
+ * for columns represented by ColumnHandle instances. It plays a crucial role in the
+ * ConstraintExtractor class for extracting TupleDomain from constraints.
+ *
+ * <p>Implementations of this interface should be capable of mapping a ColumnHandle
+ * to its corresponding Type. This information is essential for handling expressions
+ * and constraints involving columns in a connector.
+ *
+ * @param <C> The type of ColumnHandle or its subclass that this provider supports.
+ *            It ensures that the ColumnHandle passed to the methods is of the correct
+ *            type or its subclasses.
+ */
 public interface ColumnTypeProvider<C>
 {
+    /**
+     * Retrieves the Type information for the given column represented by the provided
+     * ColumnHandle.
+     *
+     * @param column The handle representing a column.
+     * @return The Type of the specified column.
+     * @throws UnsupportedOperationException if the type information for the column
+     *         represented by the provided handle is not supported.
+     */
     Type getType(C column);
 }
