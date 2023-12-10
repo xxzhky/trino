@@ -62,11 +62,11 @@ import static java.time.ZoneOffset.UTC;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
-public final class ConstraintExtractor<C>
+ public final class ConstraintExtractor
 {
     private ConstraintExtractor() {}
 
-    public static <C> ExtractionResult extractTupleDomain(Constraint constraint, ColumnTypeProvider<C> columnTypeProvider)
+    public static <C extends ColumnHandle> ExtractionResult<C> extractTupleDomain(Constraint constraint, ColumnTypeProvider<C> columnTypeProvider)
     {
         TupleDomain<C> result = constraint.getSummary()
                 .transformKeys(key -> (C) key);
@@ -269,10 +269,10 @@ public final class ConstraintExtractor<C>
         }
 
         C column = resolve(sourceVariable, assignments);
-        Type t = columnTypeProvider.getType(column);
-        if (t instanceof TimestampWithTimeZoneType type) {
+        Type columnType = columnTypeProvider.getType(column);
+        if (columnType instanceof TimestampWithTimeZoneType type) {
             // Iceberg supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", t);
+            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
             verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
 
             return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)
@@ -400,7 +400,7 @@ public final class ConstraintExtractor<C>
         return (C) columnHandle;
     }
 
-    public record ExtractionResult(TupleDomain tupleDomain, ConnectorExpression remainingExpression)
+    public record ExtractionResult<C extends ColumnHandle>(TupleDomain<C> tupleDomain, ConnectorExpression remainingExpression)
     {
         public ExtractionResult
         {
