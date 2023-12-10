@@ -13,7 +13,6 @@
  */
 package io.trino.plugin.kafka;
 
-import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.type.Type;
 
 /**
