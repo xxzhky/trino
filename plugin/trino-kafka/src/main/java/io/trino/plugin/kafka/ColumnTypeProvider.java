@@ -19,4 +19,3 @@ public interface ColumnTypeProvider<C>
 {
     Type getType(C column);
 }
-

@@ -62,7 +62,7 @@ import static java.time.ZoneOffset.UTC;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
 
- public final class ConstraintExtractor
+public final class ConstraintExtractor
 {
     private ConstraintExtractor() {}
 
