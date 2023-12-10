@@ -39,5 +39,6 @@ public interface ColumnTypeProvider<C>
      * @throws UnsupportedOperationException if the type information for the column
      *         represented by the provided handle is not supported.
      */
-    Type getType(C column) throws UnsupportedOperationException;
+    Type getType(C column)
+            throws UnsupportedOperationException;
 }
