@@ -299,6 +299,14 @@ public final class KafkaTableHandle
                 .toString();
     }
 
+    /**
+     * Returns the list of KafkaColumnHandles that represent the remaining predicate columns.
+     * The method filters out the columns that are not compatible with the Kafka connector,
+     * such as columns that are not part of the supported types or columns associated with unsupported operations.
+     *
+     * @param internalFieldManager The KafkaInternalFieldManager used to retrieve the internal field ID of a column
+     * @return The list of remaining predicate columns that can be used for filtering
+     */
     public List<KafkaColumnHandle> getRemainingPredicateColumn(final KafkaInternalFieldManager internalFieldManager)
     {
         // the connector for database does not support discrete range matching(or multiple ranges)
@@ -312,15 +320,13 @@ public final class KafkaTableHandle
                     switch (internalFieldManager.getInternalFieldId(kafkaColumnHandleDomainEntry.getKey())) {
                         case PARTITION_OFFSET_FIELD -> {
                             ValueSet valueSet = kafkaColumnHandleDomainEntry.getValue().getValues();
-                            if (valueSet instanceof SortedRangeSet && ((SortedRangeSet) valueSet).getRanges().getRangeCount() == 1) {
+                            if (valueSet instanceof SortedRangeSet sortedSet
+                                    && sortedSet.getRanges().getRangeCount() == 1) {
                                 return true;
                             }
                         }
                         case PARTITION_ID_FIELD -> {
                             return true;
-                        }
-                        default -> {
-                            return false;
                         }
                     }
                     return false;
