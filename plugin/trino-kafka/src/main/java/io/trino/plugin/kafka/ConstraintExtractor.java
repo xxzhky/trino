@@ -61,11 +61,36 @@ import static java.math.RoundingMode.UNNECESSARY;
 import static java.time.ZoneOffset.UTC;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
-
+/**
+ * This class is used to extract and manipulate constraint related data.
+ * It provides static functions to handle different operations,
+ * including transforming constraints and expressions, managing conjuncts,
+ * converting and intersecting tuple domains, and handling different types of calls.
+ * <p>
+ * It has several private static helper methods for dealing with various cases
+ * of comparisons and conversions, such as timestamp to date casts and date truncations.
+ * Specialized handling for processing Connector specific timestamp handling is also included.
+ * <p>
+ * This class ends with a nested record ExtractionResult,
+ * which groups a TupleDomain with a remaining ConnnectorExpression,
+ * representing the result of an extraction process.
+ * <p>
+ * This class is declared as final, and it also has a private constructor,
+ * which means it cannot be instantiated or sub-classed.
+ * All of its methods are static and can be accessed directly from the class.
+ */
 public final class ConstraintExtractor
 {
     private ConstraintExtractor() {}
 
+    /**
+     * Extracts the tuple domain and remaining expressions from a constraint.
+     *
+     * @param <C> the type of the column handle
+     * @param constraint the constraint to extract from
+     * @param columnTypeProvider provides the column types for the given column handles
+     * @return an ExtractionResult object containing the extracted tuple domain and remaining expressions
+     */
     public static <C extends ColumnHandle> ExtractionResult<C> extractTupleDomain(Constraint constraint, ColumnTypeProvider<C> columnTypeProvider)
     {
         TupleDomain<C> result = constraint.getSummary()
@@ -171,8 +196,6 @@ public final class ConstraintExtractor
         C column = resolve(sourceVariable, assignments);
         Type type = columnTypeProvider.getType(column);
         if (type instanceof TimestampWithTimeZoneType sourceType) {
-            // Iceberg supports only timestamp(6) with time zone
-            checkArgument(sourceType.getPrecision() == 6, "Unexpected type: %s", type);
 
             if (constant.getType() == DateType.DATE) {
                 return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
@@ -193,7 +216,7 @@ public final class ConstraintExtractor
         // Verify no overflow. Date values must be in integer range.
         verify(date <= Integer.MAX_VALUE, "Date value out of range: %s", date);
 
-        // In Iceberg, timestamp with time zone values are all in UTC
+        // In the Connector, timestamp with time zone values are all in UTC
 
         LongTimestampWithTimeZone startOfDate = LongTimestampWithTimeZone.fromEpochMillisAndFraction(date * MILLISECONDS_PER_DAY, 0, UTC_KEY);
         LongTimestampWithTimeZone startOfNextDate = LongTimestampWithTimeZone.fromEpochMillisAndFraction((date + 1) * MILLISECONDS_PER_DAY, 0, UTC_KEY);
@@ -201,6 +224,17 @@ public final class ConstraintExtractor
         return createDomain(functionName, type, startOfDate, startOfNextDate);
     }
 
+    /**
+     * Unwraps the year in a comparison between a timestamp with time zone column
+     * and a constant.
+     *
+     * @param <C> the type of the column handle
+     * @param functionName the name of the function being evaluated
+     * @param type the type of the timestamp with time zone column
+     * @param constant the constant value being compared against
+     * @return an Optional containing the unwrapped domain if the constant value is not null
+     * and the type of the column is TIMESTAMP_TZ_MICROS, otherwise an empty Optional
+     */
     private static <C> Optional<Domain> unwrapYearInTimestampTzComparison(FunctionName functionName, Type type, Constant constant)
     {
         checkArgument(constant.getValue() != null, "Unexpected constant: %s", constant);
@@ -216,31 +250,45 @@ public final class ConstraintExtractor
         return createDomain(functionName, type, start, end);
     }
 
-    private static Optional<Domain> createDomain(FunctionName functionName, Type type, LongTimestampWithTimeZone startOfDate, LongTimestampWithTimeZone startOfNextDate)
-    {
-        if (functionName.equals(EQUAL_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.range(type, startOfDate, true, startOfNextDate, false)), false));
-        }
-        if (functionName.equals(NOT_EQUAL_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, startOfDate), Range.greaterThanOrEqual(type, startOfNextDate)), false));
-        }
-        if (functionName.equals(LESS_THAN_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, startOfDate)), false));
-        }
-        if (functionName.equals(LESS_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, startOfNextDate)), false));
-        }
-        if (functionName.equals(GREATER_THAN_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(type, startOfNextDate)), false));
-        }
-        if (functionName.equals(GREATER_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(type, startOfDate)), false));
-        }
-        if (functionName.equals(IS_DISTINCT_FROM_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, startOfDate), Range.greaterThanOrEqual(type, startOfNextDate)), true));
-        }
+    /**
+     * Creates a domain based on the given function name, type, start of date, and start of next date.
+     *
+     * @param functionName the name of the function used to create the domain
+     * @param type the type of the domain
+     * @param startOfDate the start of the date range
+     * @param startOfNextDate the start of the next date range
+     * @return an Optional containing the created Domain, or an empty Optional if the domain cannot be created
+     */
+    private static Optional<Domain> createDomain(FunctionName functionName, Type type, LongTimestampWithTimeZone startOfDate, LongTimestampWithTimeZone startOfNextDate) {
+        Map<FunctionName, DomainCreator> domainCreators = Map.of(
+                EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.range(t, s, true, e, false)), false)),
+                NOT_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), false)),
+                LESS_THAN_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s)), false)),
+                LESS_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, e)), false)),
+                GREATER_THAN_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, e)), false)),
+                GREATER_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, s)), false)),
+                IS_DISTINCT_FROM_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), true))
+        );
 
-        return Optional.empty();
+        return Optional.ofNullable(domainCreators.get(functionName))
+                .map(creator -> creator.create(type, startOfDate, startOfNextDate))
+                .orElse(Optional.empty());
+    }
+
+    /**
+     * This functional interface represents a domain creator that creates a new {@link Domain} with the specified type, start, and end timestamps.
+     */
+    @FunctionalInterface
+    private interface DomainCreator {
+        /**
+         * Creates a new {@link Domain} with the specified type, start, and end timestamps.
+         *
+         * @param type The type of the domain.
+         * @param start The start timestamp of the domain.
+         * @param end The end timestamp of the domain.
+         * @return An optional containing the created domain, or an empty optional if the creation fails.
+         */
+        Optional<Domain> create(Type type, LongTimestampWithTimeZone start, LongTimestampWithTimeZone end);
     }
 
     private static <C> Optional<TupleDomain<C>> unwrapDateTruncInComparison(
@@ -271,8 +319,6 @@ public final class ConstraintExtractor
         C column = resolve(sourceVariable, assignments);
         Type columnType = columnTypeProvider.getType(column);
         if (columnType instanceof TimestampWithTimeZoneType type) {
-            // Iceberg supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
             verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
 
             return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)
@@ -360,6 +406,19 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
+    /**
+     * Unwraps the year in a comparison between a timestamp with time zone column
+     * and a constant.
+     *
+     * @param <C> the type of the column handle
+     * @param functionName the name of the function being evaluated
+     * @param yearSource the source expression for the year value
+     * @param constant the constant value being compared against
+     * @param assignments a map of column assignments
+     * @param columnTypeProvider provides the column types for the given column handles
+     * @return an Optional containing the unwrapped TupleDomain if the yearSource is a variable
+     *         representing a timestamp with time zone column, otherwise an empty Optional
+     */
     private static <C> Optional<TupleDomain<C>> unwrapYearInTimestampTzComparison(
             // upon invocation, we don't know if this really is a comparison
             FunctionName functionName,
@@ -383,8 +442,6 @@ public final class ConstraintExtractor
         C column = resolve(sourceVariable, assignments);
         Type columnType = columnTypeProvider.getType(column);
         if (columnType instanceof TimestampWithTimeZoneType type) {
-            // Iceberg supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
 
             return unwrapYearInTimestampTzComparison(functionName, type, constant)
                     .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
@@ -393,15 +450,40 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
-    private static <C> C resolve(Variable variable, Map<String, ColumnHandle> assignments)
-    {
+    /**
+     * Resolves a Variable to its corresponding ColumnHandle assignment.
+     *
+     * @param <C> the type of the ColumnHandle
+     * @param variable the Variable to resolve
+     * @param assignments the map of assignments where the Variable must be present
+     * @return the corresponding ColumnHandle assignment for the Variable
+     * @throws IllegalArgumentException if no assignment is found for the Variable
+     */
+    private static <C> C resolve(Variable variable, Map<String, ColumnHandle> assignments) {
         ColumnHandle columnHandle = assignments.get(variable.getName());
         checkArgument(columnHandle != null, "No assignment for %s", variable);
         return (C) columnHandle;
     }
 
+    /**
+     * This record class, `ExtractionResult`, represents the result of an operation
+     * that extracts a tuple domain and the remaining expressions from some particular constraint.
+     * It encapsulates both the tuple domain and the remaining connector expression after the extraction.
+     *
+     * @param <C> A generic type that extends `ColumnHandle`.
+     *           It represents the type of the column handle that the `TupleDomain` consists of.
+     *
+     * @record
+     */
     public record ExtractionResult<C extends ColumnHandle>(TupleDomain<C> tupleDomain, ConnectorExpression remainingExpression)
     {
+
+        /**
+         * This is a constructor for the `ExtractionResult`. It checks that both `tupleDomain` and
+         * `remainingExpression` are not null before initializing.
+         *
+         * If either `tupleDomain` or `remainingExpression` is null, it throws a `NullPointerException`.
+         */
         public ExtractionResult
         {
             requireNonNull(tupleDomain, "tupleDomain is null");
