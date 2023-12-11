@@ -275,6 +275,32 @@ public class KafkaMetadata
         return new ConnectorTableMetadata(schemaTableName, builder.build());
     }
 
+    /**
+     * Applies the given constraint on the Kafka table to potentially push down predicates
+     * for better query performance. The method extracts the TupleDomain from the constraint,
+     * intersects it with the existing effective predicate, and creates a new KafkaTableHandle
+     * with the updated information.
+     *
+     * <p>If the effective predicate and the new constraint result in an empty predicate or
+     * there are no predicate columns, an empty Optional is returned, indicating that the
+     * constraint can be fully pushed down and the connector should skip the filtering process.
+     * If the effective predicate remains unchanged, an empty Optional is also returned.
+     * Otherwise, a new KafkaTableHandle with the updated predicate information is returned
+     * in the Optional.
+     *
+     * <p>The method also handles the decision of whether predicate pushdown is suitable based
+     * on the session properties and the nature of the columns involved in the predicate.
+     * If pushdown is enabled and feasible, the result includes information about the pushdown.
+     *
+     * @param session The current connector session.
+     * @param table   The KafkaTableHandle representing the table.
+     * @param constraint The constraint to be applied to the table.
+     * @return An Optional containing the result of the constraint application. If the
+     *         effective predicate remains unchanged or can be fully pushed down, an empty
+     *         Optional is returned. Otherwise, the Optional contains a
+     *         ConstraintApplicationResult with the updated KafkaTableHandle and related
+     *         information.
+     */
     @Override
     public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session, ConnectorTableHandle table, Constraint constraint)
     {
