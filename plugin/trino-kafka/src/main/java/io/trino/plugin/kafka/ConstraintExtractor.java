@@ -78,6 +78,8 @@ import static java.util.Objects.requireNonNull;
  * This class is declared as final, and it also has a private constructor,
  * which means it cannot be instantiated or sub-classed.
  * All of its methods are static and can be accessed directly from the class.
+ * <p>
+ * we should do some unit-tests here.
  */
 public final class ConstraintExtractor
 {
