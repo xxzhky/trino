@@ -313,7 +313,7 @@ public class KafkaMetadata
             return Optional.empty();
         }
         // some effective/unforced tuple sitting in the table handle included, and it does work
-        TupleDomain<ColumnHandle> effectivePredicate = constraint.getSummary().intersect(handle.getConstraint());
+        TupleDomain<ColumnHandle> effectivePredicate = predicate.transformKeys(ColumnHandle.class::cast).intersect(handle.getConstraint());
         TupleDomain<KafkaColumnHandle> compactEffectivePredicate = toCompactTupleDomain(effectivePredicate, domainCompactionThreshold);
         KafkaTableHandle newHandle = new KafkaTableHandle(
                 handle.getSchemaName(),
