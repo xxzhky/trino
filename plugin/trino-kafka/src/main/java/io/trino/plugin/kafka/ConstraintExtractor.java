@@ -251,6 +251,8 @@ public final class ConstraintExtractor
         C column = resolve(sourceVariable, assignments);
         Type columnType = columnTypeProvider.getType(column);
         if (columnType instanceof TimestampWithTimeZoneType sourceType) {
+            // Iceberg supports only timestamp(6) with time zone
+            checkArgument(sourceType.getPrecision() == 6, "Unexpected type: %s", columnType);
 
             if (constant.getType() == DateType.DATE) {
                 return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
@@ -396,6 +398,8 @@ public final class ConstraintExtractor
         C column = resolve(sourceVariable, assignments);
         Type columnType = columnTypeProvider.getType(column);
         if (columnType instanceof TimestampWithTimeZoneType type) {
+            // Iceberg supports only timestamp(6) with time zone
+            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
             verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
 
             return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)
@@ -519,6 +523,8 @@ public final class ConstraintExtractor
         C column = resolve(sourceVariable, assignments);
         Type columnType = columnTypeProvider.getType(column);
         if (columnType instanceof TimestampWithTimeZoneType type) {
+            // Iceberg supports only timestamp(6) with time zone
+            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
 
             return unwrapYearInTimestampTzComparison(functionName, type, constant)
                     .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
