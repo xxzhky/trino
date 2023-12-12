@@ -111,6 +111,16 @@ public final class ConstraintExtractor
         return new ExtractionResult(result, and(remainingExpressions.build()));
     }
 
+    /**
+     * Converts a ConnectorExpression to TupleDomain.
+     *
+     * @param <C> the type of the column handle
+     * @param expression the ConnectorExpression to convert
+     * @param assignments a map of column assignments
+     * @param columnTypeProvider provides the column types for the given column handles
+     * @return an Optional containing the converted TupleDomain if the expression is a Call,
+     *         otherwise an empty Optional
+     */
     private static <C> Optional<TupleDomain<C>> toTupleDomain(ConnectorExpression expression, Map<String, ColumnHandle> assignments, ColumnTypeProvider<C> columnTypeProvider)
     {
         if (expression instanceof Call call) {
@@ -119,6 +129,30 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
+    /**
+     * Attempts to convert a 'Call' expression into a 'TupleDomain', if applicable. This method handles
+     * specific patterns of 'Call' expressions, particularly those involving 'cast', 'date_trunc', and 'year'
+     * functions, and attempts to transform them into a 'TupleDomain' representation.
+     *
+     * @param <C> the generic type parameter representing the column handle type.
+     * @param call the 'Call' expression to be converted. It represents a function call in the query.
+     * @param assignments a mapping of string identifiers to 'ColumnHandle' objects, used to resolve column references.
+     * @param columnTypeProvider a provider for column types based on column handles, used to determine data types for columns.
+     * @return an 'Optional' containing the 'TupleDomain' if conversion is applicable and successful, otherwise an empty 'Optional'.
+     *
+     * The method first checks if the 'Call' expression has exactly two arguments, a pattern common in binary functions
+     * like comparisons. It then examines the type and nature of these arguments:
+     *
+     * - If the first argument is a 'cast' function call and the second is a constant, and both arguments have the same type,
+     *   it attempts to unwrap this cast comparison into a 'TupleDomain'.
+     * - If the first argument is a 'date_trunc' function call and the second is a constant, with both having the same type,
+     *   it tries to unwrap this date truncation comparison.
+     * - If the first argument is a 'year' function call on a 'TimestampWithTimeZoneType' and the second is a constant,
+     *   with both having the same type, it unwraps this year comparison.
+     *
+     * If none of these patterns match, or if the arguments' types do not align in a way that permits meaningful comparison,
+     * the method returns an empty 'Optional', indicating that no 'TupleDomain' representation is applicable for the given 'Call'.
+     */
     private static <C> Optional<TupleDomain<C>> toTupleDomain(Call call, Map<String, ColumnHandle> assignments, ColumnTypeProvider<C> columnTypeProvider)
     {
         if (call.getArguments().size() == 2) {
@@ -173,6 +207,27 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
+    /**
+     * Tries to unwrap a cast operation within a comparison expression and convert it into a TupleDomain.
+     * This method specifically handles cases where a cast operation is used in a comparison, such as
+     * casting a column to a different type and then comparing it to a constant value.
+     *
+     * @param <C> the generic type parameter representing the column handle type.
+     * @param functionName the name of the function that represents the comparison operation.
+     * @param castSource the expression that is being cast, typically a column or a variable in the query.
+     * @param constant the constant value being compared against after the cast operation.
+     * @param assignments a map of string identifiers to column handles, used for resolving column references in expressions.
+     * @param columnTypeProvider a provider for column types based on column handles, used to determine data types for columns.
+     * @return an Optional containing the TupleDomain if the cast can be successfully unwrapped into a meaningful comparison, otherwise an empty Optional.
+     *
+     * The method performs several checks and transformations:
+     * - It first verifies that the castSource is a variable (source column), as the method is designed to work primarily with source columns.
+     * - It then checks if the constant is non-null, as comparisons with null are expected to be simplified by the query engine.
+     * - After resolving the column and its type, the method handles specific cases, like casting a timestamp with time zone to a date,
+     *   and attempts to create a corresponding TupleDomain.
+     * - If the operation involves a type or pattern not handled by this method (e.g., unsupported cast types or non-source columns),
+     *   it returns an empty Optional, indicating that the cast cannot be unwrapped into a domain in the current context.
+     */
     private static <C> Optional<TupleDomain<C>> unwrapCastInComparison(
             // upon invocation, we don't know if this really is a comparison
             FunctionName functionName,
@@ -194,8 +249,8 @@ public final class ConstraintExtractor
         }
 
         C column = resolve(sourceVariable, assignments);
-        Type type = columnTypeProvider.getType(column);
-        if (type instanceof TimestampWithTimeZoneType sourceType) {
+        Type columnType = columnTypeProvider.getType(column);
+        if (columnType instanceof TimestampWithTimeZoneType sourceType) {
 
             if (constant.getType() == DateType.DATE) {
                 return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
@@ -207,6 +262,26 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
+    /**
+     * Unwraps a cast operation from timestamp with timezone to date within a comparison expression and converts it into a Domain.
+     * This method specifically handles cases where a timestamp with timezone column is cast to a date and then compared against
+     * a constant date value.
+     *
+     * @param <C> the generic type parameter representing the column handle type.
+     * @param column the column handle, representing a column in the query that is cast from timestamp with timezone to date.
+     * @param functionName the name of the comparison function being used in the expression.
+     * @param date the date value (in epoch days) that the timestamp with timezone is compared to.
+     * @param columnTypeProvider a provider for column types based on column handles, used to determine the data type of the column.
+     * @return an Optional containing the Domain if the cast and comparison can be successfully unwrapped, otherwise an empty Optional.
+     *
+     * The method performs several operations:
+     * - It first validates that the column is of the expected type (timestamp with timezone).
+     * - It checks to ensure the provided date value does not cause overflow issues, asserting that it must be within the integer range.
+     * - The method then calculates the start of the given date and the start of the next date in terms of timestamp with timezone.
+     * - These calculated timestamps are then used to create a Domain that represents the result of the comparison operation.
+     * - If the column type does not match or if other validation checks fail, the method returns an empty Optional,
+     *   indicating that the Domain cannot be created for the given parameters.
+     */
     private static <C> Optional<Domain> unwrapTimestampTzToDateCast(C column, FunctionName functionName, long date, ColumnTypeProvider<C> columnTypeProvider)
     {
         //Type type = column.getType();
@@ -259,7 +334,8 @@ public final class ConstraintExtractor
      * @param startOfNextDate the start of the next date range
      * @return an Optional containing the created Domain, or an empty Optional if the domain cannot be created
      */
-    private static Optional<Domain> createDomain(FunctionName functionName, Type type, LongTimestampWithTimeZone startOfDate, LongTimestampWithTimeZone startOfNextDate) {
+    private static Optional<Domain> createDomain(FunctionName functionName, Type type, LongTimestampWithTimeZone startOfDate, LongTimestampWithTimeZone startOfNextDate)
+    {
         Map<FunctionName, DomainCreator> domainCreators = Map.of(
                 EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.range(t, s, true, e, false)), false)),
                 NOT_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), false)),
@@ -279,7 +355,8 @@ public final class ConstraintExtractor
      * This functional interface represents a domain creator that creates a new {@link Domain} with the specified type, start, and end timestamps.
      */
     @FunctionalInterface
-    private interface DomainCreator {
+    private interface DomainCreator
+    {
         /**
          * Creates a new {@link Domain} with the specified type, start, and end timestamps.
          *
