@@ -15,6 +15,8 @@ package io.trino.plugin.kafka;
 
 import io.trino.spi.type.Type;
 
+import java.util.Optional;
+
 /**
  * The ColumnTypeProvider interface is responsible for providing type information
  * for columns represented by ColumnHandle instances. It plays a crucial role in the
@@ -39,6 +41,6 @@ public interface ColumnTypeProvider<C>
      * @throws UnsupportedOperationException if the type information for the column
      *         represented by the provided handle is not supported.
      */
-    Type getType(C column)
+    Optional<Type> getType(C column)
             throws UnsupportedOperationException;
 }

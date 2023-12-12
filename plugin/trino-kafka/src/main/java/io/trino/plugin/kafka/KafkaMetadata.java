@@ -305,9 +305,11 @@ public class KafkaMetadata
     public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session, ConnectorTableHandle table, Constraint constraint)
     {
         KafkaTableHandle handle = (KafkaTableHandle) table;
-        ConstraintExtractor.ExtractionResult<KafkaColumnHandle> extractionResult = extractTupleDomain(constraint, KafkaColumnHandle::getType);
+        ConstraintExtractor.ExtractionResult<KafkaColumnHandle> extractionResult = extractTupleDomain(constraint,
+                KafkaColumnHandle::getColumnTypeIfInternal);
         ConnectorExpression connectorExpression = extractionResult.remainingExpression();
-        if (extractionResult.tupleDomain().isAll() && constraint.getPredicateColumns().isEmpty()) {
+        TupleDomain<KafkaColumnHandle> predicate = extractionResult.tupleDomain();
+        if (predicate.isAll() && constraint.getPredicateColumns().isEmpty()) {
             return Optional.empty();
         }
         // some effective/unforced tuple sitting in the table handle included, and it does work

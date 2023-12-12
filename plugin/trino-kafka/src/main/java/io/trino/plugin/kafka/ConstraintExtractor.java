@@ -249,8 +249,8 @@ public final class ConstraintExtractor
         }
 
         C column = resolve(sourceVariable, assignments);
-        Type columnType = columnTypeProvider.getType(column);
-        if (columnType instanceof TimestampWithTimeZoneType sourceType) {
+        Optional<Type> columnType = columnTypeProvider.getType(column);
+        if (columnType.isPresent() && columnType.get() instanceof TimestampWithTimeZoneType sourceType) {
             // Iceberg supports only timestamp(6) with time zone
             checkArgument(sourceType.getPrecision() == 6, "Unexpected type: %s", columnType);
 
@@ -287,7 +287,7 @@ public final class ConstraintExtractor
     private static <C> Optional<Domain> unwrapTimestampTzToDateCast(C column, FunctionName functionName, long date, ColumnTypeProvider<C> columnTypeProvider)
     {
         //Type type = column.getType();
-        Type type = columnTypeProvider.getType(column);
+        Type type = columnTypeProvider.getType(column).orElseThrow();
         checkArgument(type.equals(TIMESTAMP_TZ_MICROS), "Column of unexpected type %s: %s", type, column);
 
         // Verify no overflow. Date values must be in integer range.
@@ -396,8 +396,8 @@ public final class ConstraintExtractor
         }
 
         C column = resolve(sourceVariable, assignments);
-        Type columnType = columnTypeProvider.getType(column);
-        if (columnType instanceof TimestampWithTimeZoneType type) {
+        Optional<Type> columnType = columnTypeProvider.getType(column);
+        if (columnType.isPresent() && columnType.get()  instanceof TimestampWithTimeZoneType type) {
             // Iceberg supports only timestamp(6) with time zone
             checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
             verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
@@ -409,7 +409,7 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
-    private static Optional<Domain> unwrapDateTruncInComparison(String unit, FunctionName functionName, Constant constant)
+    private static Optional<Domain> unwrapDateTruncInComparison0(String unit, FunctionName functionName, Constant constant)
     {
         Type type = constant.getType();
         checkArgument(constant.getValue() != null, "Unexpected constant: %s", constant);
@@ -487,6 +487,90 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
+    private static Optional<Domain> unwrapDateTruncInComparison(String unit, FunctionName functionName, Constant constant) {
+        if (!isValidConstant(constant)) {
+            return Optional.empty();
+        }
+
+        ZonedDateTime dateTime = convertConstantToZonedDateTime(constant);
+        PeriodInterval periodInterval = calculatePeriodInterval(unit, dateTime);
+        if (periodInterval == null) {
+            return Optional.empty();
+        }
+
+        LongTimestampWithTimeZone startTimestamp = convertToLongTimestampWithTimeZone(periodInterval.start);
+        LongTimestampWithTimeZone endTimestamp = convertToLongTimestampWithTimeZone(periodInterval.end);
+        boolean isConstantAtPeriodStart = dateTime.equals(periodInterval.start);
+
+        return createDomainBasedOnFunction(functionName, constant.getType(),
+                startTimestamp, endTimestamp, isConstantAtPeriodStart);
+    }
+
+    private static boolean isValidConstant(Constant constant) {
+        return constant.getValue() instanceof LongTimestampWithTimeZone &&
+                constant.getType().equals(TIMESTAMP_TZ_MICROS);
+    }
+
+    private static ZonedDateTime convertConstantToZonedDateTime(Constant constant) {
+        LongTimestampWithTimeZone timestamp = (LongTimestampWithTimeZone) constant.getValue();
+        return Instant.ofEpochMilli(timestamp.getEpochMillis())
+                .plusNanos(LongMath.divide(timestamp.getPicosOfMilli(), PICOSECONDS_PER_NANOSECOND, UNNECESSARY))
+                .atZone(UTC);
+    }
+
+    private static PeriodInterval calculatePeriodInterval(String unit, ZonedDateTime dateTime) {
+        return switch (unit.toLowerCase(ENGLISH)) {
+            case "hour" -> new PeriodInterval(dateTime, dateTime.plusHours(1));
+            case "day" -> new PeriodInterval(dateTime.toLocalDate().atStartOfDay(UTC), dateTime.plusDays(1));
+            case "month" -> new PeriodInterval(dateTime.toLocalDate().withDayOfMonth(1).atStartOfDay(UTC), dateTime.plusMonths(1));
+            case "year" -> new PeriodInterval(dateTime.toLocalDate().withDayOfMonth(1).withMonth(1).atStartOfDay(UTC), dateTime.plusYears(1));
+            default -> null;
+        };
+    }
+
+    private static LongTimestampWithTimeZone convertToLongTimestampWithTimeZone(ZonedDateTime zonedDateTime) {
+        return LongTimestampWithTimeZone.fromEpochSecondsAndFraction(zonedDateTime.toEpochSecond(), 0, UTC_KEY);
+    }
+
+    private static Optional<Domain> createDomainBasedOnFunction(FunctionName functionName, Type type,
+                                                                LongTimestampWithTimeZone start, LongTimestampWithTimeZone end,
+                                                                boolean isConstantAtPeriodStart) {
+        Map<FunctionName, ComparisonDomainCreator> domainCreators = Map.of(
+                EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> atStart
+                        ? Optional.of(Domain.create(ValueSet.ofRanges(Range.range(t, s, true, e, false)), false))
+                        : Optional.of(Domain.none(t)),
+                NOT_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> atStart
+                        ? Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), false))
+                        : Optional.of(Domain.notNull(t)),
+                IS_DISTINCT_FROM_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> atStart
+                        ? Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), true))
+                        : Optional.of(Domain.all(t)),
+                LESS_THAN_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, atStart ? s : e)), false)),
+                LESS_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, e)), false)),
+                GREATER_THAN_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, e)), false)),
+                GREATER_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, atStart ? s : e)), false))
+        );
+
+        return Optional.ofNullable(domainCreators.get(functionName))
+                .map(creator -> creator.create(type, start, end, isConstantAtPeriodStart))
+                .orElse(Optional.empty());
+    }
+
+    @FunctionalInterface
+    private interface ComparisonDomainCreator {
+        Optional<Domain> create(Type type, LongTimestampWithTimeZone start, LongTimestampWithTimeZone end, boolean isConstantAtPeriodStart);
+    }
+
+    private static class PeriodInterval {
+        ZonedDateTime start;
+        ZonedDateTime end;
+
+        PeriodInterval(ZonedDateTime start, ZonedDateTime end) {
+            this.start = start;
+            this.end = end;
+        }
+    }
+
     /**
      * Unwraps the year in a comparison between a timestamp with time zone column
      * and a constant.
@@ -521,8 +605,8 @@ public final class ConstraintExtractor
         }
 
         C column = resolve(sourceVariable, assignments);
-        Type columnType = columnTypeProvider.getType(column);
-        if (columnType instanceof TimestampWithTimeZoneType type) {
+        Optional<Type> columnType = columnTypeProvider.getType(column);
+        if (columnType.isPresent() && columnType.get()  instanceof TimestampWithTimeZoneType type) {
             // Iceberg supports only timestamp(6) with time zone
             checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
 
