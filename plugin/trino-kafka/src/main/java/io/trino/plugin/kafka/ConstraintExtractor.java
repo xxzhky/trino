@@ -487,6 +487,22 @@ public final class ConstraintExtractor
         return Optional.empty();
     }
 
+    /**
+     * Unwraps a date truncation comparison to create a domain.
+     * This method processes a comparison where a date-time value has been truncated to a specific unit
+     * (e.g., hour, day, month, year) and then compared to a constant value.
+     *
+     * @param unit The unit of date truncation (e.g., "hour", "day", "month", "year").
+     * @param functionName The name of the function representing the comparison operation.
+     * @param constant The constant value used in the comparison.
+     * @return An Optional containing the created Domain if the comparison can be unwrapped successfully, otherwise an empty Optional.
+     *
+     * The method first checks if the constant is valid for this kind of comparison.
+     * It then converts the constant to a ZonedDateTime and calculates the start and end of the period based on the truncation unit.
+     * If a valid period can be determined, it converts the start and end times to LongTimestampWithTimeZone format.
+     * Finally, it calls 'createDomainBasedOnFunction' to create the appropriate domain for the given comparison function,
+     * taking into account whether the constant is at the start of the calculated period.
+     */
     private static Optional<Domain> unwrapDateTruncInComparison(String unit, FunctionName functionName, Constant constant) {
         if (!isValidConstant(constant)) {
             return Optional.empty();
@@ -532,6 +548,18 @@ public final class ConstraintExtractor
         return LongTimestampWithTimeZone.fromEpochSecondsAndFraction(zonedDateTime.toEpochSecond(), 0, UTC_KEY);
     }
 
+    /**
+     * Creates a domain for a given comparison function based on the type, start, end, and a boolean flag.
+     * This method utilizes a map of function names to domain creators, selecting the appropriate domain logic
+     * based on the specified comparison function.
+     *
+     * @param functionName The name of the comparison function to be used.
+     * @param type The data type of the domain.
+     * @param start The start timestamp of the domain.
+     * @param end The end timestamp of the domain.
+     * @param isConstantAtPeriodStart A boolean flag indicating if the constant is at the start of the period.
+     * @return An Optional containing the created Domain if a matching domain creator is found; otherwise, an empty Optional.
+     */
     private static Optional<Domain> createDomainBasedOnFunction(FunctionName functionName, Type type,
                                                                 LongTimestampWithTimeZone start, LongTimestampWithTimeZone end,
                                                                 boolean isConstantAtPeriodStart) {
@@ -561,6 +589,9 @@ public final class ConstraintExtractor
         Optional<Domain> create(Type type, LongTimestampWithTimeZone start, LongTimestampWithTimeZone end, boolean isConstantAtPeriodStart);
     }
 
+    /**
+     * Represents a time interval defined by a start and end {@link ZonedDateTime}.
+     */
     private static class PeriodInterval {
         ZonedDateTime start;
         ZonedDateTime end;
