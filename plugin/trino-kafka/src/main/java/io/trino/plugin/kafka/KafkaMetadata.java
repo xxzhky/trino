@@ -305,6 +305,7 @@ public class KafkaMetadata
     public Optional<ConstraintApplicationResult<ConnectorTableHandle>> applyFilter(ConnectorSession session, ConnectorTableHandle table, Constraint constraint)
     {
         KafkaTableHandle handle = (KafkaTableHandle) table;
+        // We might need to dispose the predicate push-down of non-internal columns in the near future
         ConstraintExtractor.ExtractionResult<KafkaColumnHandle> extractionResult = extractTupleDomain(constraint,
                 KafkaColumnHandle::getColumnTypeIfInternal);
         ConnectorExpression connectorExpression = extractionResult.remainingExpression();
