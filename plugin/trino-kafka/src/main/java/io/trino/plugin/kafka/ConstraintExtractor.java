@@ -372,6 +372,18 @@ public final class ConstraintExtractor
         Optional<Domain> create(Type type, LongTimestampWithTimeZone start, LongTimestampWithTimeZone end);
     }
 
+    /**
+     * Unwraps the date_trunc function in a comparison operation.
+     *
+     * @param functionName The name of the function.
+     * @param unit The unit of time used in the truncation.
+     * @param dateTruncSource The source of the date_trunc function.
+     * @param constant The constant value being compared.
+     * @param assignments A map of column assignments.
+     * @param columnTypeProvider A provider for column types.
+     * @param <C> The column type.
+     * @return An Optional TupleDomain that represents the unwrapped comparison. Returns Optional.empty() if unable to unwrap the date_trunc function.
+     */
     private static <C> Optional<TupleDomain<C>> unwrapDateTruncInComparison(
             // upon invocation, we don't know if this really is a comparison
             FunctionName functionName,
@@ -536,6 +548,13 @@ public final class ConstraintExtractor
                 .atZone(UTC);
     }
 
+    /**
+     * Calculates the period interval based on the given unit and dateTime.
+     *
+     * @param unit      the unit of time (hour, day, month, year)
+     * @param dateTime  the reference date and time
+     * @return the calculated PeriodInterval object, or null if the unit is invalid
+     */
     private static PeriodInterval calculatePeriodInterval(String unit, ZonedDateTime dateTime) {
         return switch (unit.toLowerCase(ENGLISH)) {
             case "hour" -> new PeriodInterval(dateTime, dateTime.plusHours(1));
@@ -586,6 +605,9 @@ public final class ConstraintExtractor
                 .orElse(Optional.empty());
     }
 
+    /**
+     * Represents a functional interface for creating a comparison domain.
+     */
     @FunctionalInterface
     private interface ComparisonDomainCreator {
         Optional<Domain> create(Type type, LongTimestampWithTimeZone start, LongTimestampWithTimeZone end, boolean isConstantAtPeriodStart);
@@ -605,17 +627,15 @@ public final class ConstraintExtractor
     }
 
     /**
-     * Unwraps the year in a comparison between a timestamp with time zone column
-     * and a constant.
+     * Unwraps the year in a comparison of TIMESTAMP WITH TIME ZONE type column with a constant year value.
      *
-     * @param <C> the type of the column handle
-     * @param functionName the name of the function being evaluated
-     * @param yearSource the source expression for the year value
-     * @param constant the constant value being compared against
-     * @param assignments a map of column assignments
-     * @param columnTypeProvider provides the column types for the given column handles
-     * @return an Optional containing the unwrapped TupleDomain if the yearSource is a variable
-     *         representing a timestamp with time zone column, otherwise an empty Optional
+     * @param functionName     The name of the function that is invoking this method
+     * @param yearSource       The expression representing the year source column
+     * @param constant         The constant year value
+     * @param assignments      The assignments for the columns
+     * @param columnTypeProvider The provider for the column types
+     * @param <C>              The column handle type
+     * @return An Optional containing the unwrapped year in the comparison, or an empty Optional if the year cannot be unwrapped
      */
     private static <C> Optional<TupleDomain<C>> unwrapYearInTimestampTzComparison(
             // upon invocation, we don't know if this really is a comparison

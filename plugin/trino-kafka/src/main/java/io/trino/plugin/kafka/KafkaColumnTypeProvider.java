@@ -15,11 +15,13 @@ package io.trino.plugin.kafka;
 
 import io.trino.spi.type.Type;
 
+import java.util.Optional;
+
 public record KafkaColumnTypeProvider() implements ColumnTypeProvider<KafkaColumnHandle>
 {
     @Override
-    public Type getType(KafkaColumnHandle column)
+    public Optional<Type> getType(KafkaColumnHandle column)
     {
-        return column.getType();
+        return Optional.of(column.getType());
     }
 }
