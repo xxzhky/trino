@@ -29,7 +29,9 @@ import io.trino.spi.predicate.Range;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
 import io.trino.spi.type.DateType;
+import io.trino.spi.type.LongTimestamp;
 import io.trino.spi.type.LongTimestampWithTimeZone;
+import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.Type;
 
@@ -38,6 +40,8 @@ import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Verify.verify;
@@ -53,7 +57,9 @@ import static io.trino.spi.expression.StandardFunctions.LESS_THAN_OPERATOR_FUNCT
 import static io.trino.spi.expression.StandardFunctions.LESS_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME;
 import static io.trino.spi.expression.StandardFunctions.NOT_EQUAL_OPERATOR_FUNCTION_NAME;
 import static io.trino.spi.type.TimeZoneKey.UTC_KEY;
+import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MICROS;
+import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_DAY;
 import static io.trino.spi.type.Timestamps.MILLISECONDS_PER_DAY;
 import static io.trino.spi.type.Timestamps.PICOSECONDS_PER_NANOSECOND;
 import static java.lang.Math.toIntExact;
@@ -210,25 +216,19 @@ public final class ConstraintExtractor
     }
 
     /**
-     * Tries to unwrap a cast operation within a comparison expression and convert it into a TupleDomain.
-     * This method specifically handles cases where a cast operation is used in a comparison, such as
-     * casting a column to a different type and then comparing it to a constant value.
+     * Attempts to unwrap a cast operation within a comparison expression and convert it into a TupleDomain.
+     * This method is specifically designed to handle cases where a column is cast to a different type and then compared against a constant value.
      *
-     * @param <C> the generic type parameter representing the column handle type.
-     * @param functionName the name of the function that represents the comparison operation.
-     * @param castSource the expression that is being cast, typically a column or a variable in the query.
-     * @param constant the constant value being compared against after the cast operation.
-     * @param assignments a map of string identifiers to column handles, used for resolving column references in expressions.
-     * @param columnTypeProvider a provider for column types based on column handles, used to determine data types for columns.
-     * @return an Optional containing the TupleDomain if the cast can be successfully unwrapped into a meaningful comparison, otherwise an empty Optional.
+     * @param <C> The generic type parameter representing the column handle type.
+     * @param functionName The name of the function representing the comparison operation.
+     * @param castSource The expression that is being cast, typically a column or a variable in the query.
+     * @param constant The constant value being compared against after the cast operation.
+     * @param assignments A map of string identifiers to column handles, used for resolving column references in expressions.
+     * @param columnTypeProvider A provider for column types based on column handles, used to determine data types for columns.
+     * @return An Optional containing the TupleDomain if the cast can be successfully unwrapped into a meaningful comparison, otherwise an empty Optional.
      *
-     * The method performs several checks and transformations:
-     * - It first verifies that the castSource is a variable (source column), as the method is designed to work primarily with source columns.
-     * - It then checks if the constant is non-null, as comparisons with null are expected to be simplified by the query engine.
-     * - After resolving the column and its type, the method handles specific cases, like casting a timestamp with time zone to a date,
-     *   and attempts to create a corresponding TupleDomain.
-     * - If the operation involves a type or pattern not handled by this method (e.g., unsupported cast types or non-source columns),
-     *   it returns an empty Optional, indicating that the cast cannot be unwrapped into a domain in the current context.
+     * The method first checks if the castSource is a variable and the constant is not null, as the method is designed to work primarily with source columns and non-null constants.
+     * It then delegates to the processCastComparison method for further processing based on the column type.
      */
     private static <C> Optional<TupleDomain<C>> unwrapCastInComparison(
             // upon invocation, we don't know if this really is a comparison
@@ -251,19 +251,46 @@ public final class ConstraintExtractor
         }
 
         C column = resolve(sourceVariable, assignments);
-        Optional<Type> columnType = columnTypeProvider.getType(column);
-        if (columnType.isPresent() && columnType.get() instanceof TimestampWithTimeZoneType sourceType) {
-            // Iceberg supports only timestamp(6) with time zone
-            checkArgument(sourceType.getPrecision() == 6, "Unexpected type: %s", columnType);
+        return processCastComparison(column, functionName, constant, columnTypeProvider);
+    }
 
-            if (constant.getType() == DateType.DATE) {
-                return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
-                        .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
-            }
-            // TODO support timestamp constant
+    /**
+     * Processes the cast comparison by determining the type of the column and performing the appropriate unwrapping logic.
+     *
+     * @param <C> The generic type parameter representing the column handle type.
+     * @param column The column handle, representing a column in the query.
+     * @param functionName The name of the comparison function being used in the expression.
+     * @param constant The constant value being compared.
+     * @param columnTypeProvider A provider for column types based on column handles.
+     * @return An Optional containing the TupleDomain if the comparison can be successfully unwrapped, otherwise an empty Optional.
+     *
+     * The method checks the type of the column (TimestampWithTimeZoneType or TimestampType) and calls the respective unwrapping method.
+     * It handles specific precision requirements for timestamps (6 for with timezone and 3 for without timezone).
+     * If the column type does not match these specific types or if other checks fail, the method returns an empty Optional.
+     */
+    private static <C> Optional<TupleDomain<C>> processCastComparison(
+            C column,
+            FunctionName functionName,
+            Constant constant,
+            ColumnTypeProvider<C> columnTypeProvider)
+    {
+
+        if (constant.getValue() == null || constant.getType() != DateType.DATE) {
+            return Optional.empty();
         }
 
-        return Optional.empty();
+        return columnTypeProvider.getType(column)
+                .flatMap(type -> {
+                    // Connector supports timestamp(6) with time zone
+                    if (type instanceof TimestampWithTimeZoneType tztType && tztType.getPrecision() == 6) {
+                        return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
+                                .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
+                    } else if (type instanceof TimestampType tsType && tsType.getPrecision() == 3) {
+                        return unwrapTimestampToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
+                                .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
+                    }
+                    return Optional.<TupleDomain<C>>empty();
+                });
     }
 
     /**
@@ -271,34 +298,80 @@ public final class ConstraintExtractor
      * This method specifically handles cases where a timestamp with timezone column is cast to a date and then compared against
      * a constant date value.
      *
-     * @param <C> the generic type parameter representing the column handle type.
-     * @param column the column handle, representing a column in the query that is cast from timestamp with timezone to date.
-     * @param functionName the name of the comparison function being used in the expression.
-     * @param date the date value (in epoch days) that the timestamp with timezone is compared to.
-     * @param columnTypeProvider a provider for column types based on column handles, used to determine the data type of the column.
-     * @return an Optional containing the Domain if the cast and comparison can be successfully unwrapped, otherwise an empty Optional.
-     *
-     * The method performs several operations:
-     * - It first validates that the column is of the expected type (timestamp with timezone).
-     * - It checks to ensure the provided date value does not cause overflow issues, asserting that it must be within the integer range.
-     * - The method then calculates the start of the given date and the start of the next date in terms of timestamp with timezone.
-     * - These calculated timestamps are then used to create a Domain that represents the result of the comparison operation.
-     * - If the column type does not match or if other validation checks fail, the method returns an empty Optional,
-     *   indicating that the Domain cannot be created for the given parameters.
+     * @param <C> Generic type representing the column handle.
+     * @param column The column handle, representing a column that is cast from timestamp with timezone to date.
+     * @param functionName The name of the comparison function being used.
+     * @param date The date value in epoch days.
+     * @param columnTypeProvider A provider for column types based on column handles.
+     * @return An Optional containing the Domain if the cast and comparison can be successfully unwrapped, otherwise an empty Optional.
      */
-    private static <C> Optional<Domain> unwrapTimestampTzToDateCast(C column, FunctionName functionName, long date, ColumnTypeProvider<C> columnTypeProvider)
+    private static <C> Optional<Domain> unwrapTimestampTzToDateCast(
+            C column, FunctionName functionName, long date, ColumnTypeProvider<C> columnTypeProvider)
     {
-        //Type type = column.getType();
+        return unwrapTimestampCastToDomain(
+                column,
+                functionName,
+                date,
+                columnTypeProvider,
+                d -> LongTimestampWithTimeZone.fromEpochMillisAndFraction(d * MILLISECONDS_PER_DAY, 0, UTC_KEY),
+                type -> type.equals(TIMESTAMP_TZ_MICROS));
+    }
+
+    /**
+     * Unwraps a cast operation from timestamp to date within a comparison expression and converts it into a Domain.
+     * This method specifically handles cases where a timestamp column (without timezone) is cast to a date and then compared against
+     * a constant date value.
+     *
+     * @param <C> Generic type representing the column handle.
+     * @param column The column handle, representing a column that is cast from timestamp to date.
+     * @param functionName The name of the comparison function being used.
+     * @param date The date value in epoch days.
+     * @param columnTypeProvider A provider for column types based on column handles.
+     * @return An Optional containing the Domain if the cast and comparison can be successfully unwrapped, otherwise an empty Optional.
+     */
+    private static <C> Optional<Domain> unwrapTimestampToDateCast(
+            C column, FunctionName functionName, long date, ColumnTypeProvider<C> columnTypeProvider)
+    {
+        return unwrapTimestampCastToDomain(
+                column,
+                functionName,
+                date,
+                columnTypeProvider,
+                d -> new LongTimestamp(d * MICROSECONDS_PER_DAY, 0),
+                type -> type.equals(TIMESTAMP_MILLIS));
+    }
+
+    /**
+     * Generalized method for unwrapping a timestamp cast to a domain. This method is used to create a domain
+     * from a timestamp value, taking into account different types of timestamp representations.
+     *
+     * @param <C> Generic type representing the column handle.
+     * @param <T> Generic type representing the timestamp type.
+     * @param column The column handle involved in the comparison.
+     * @param functionName The name of the function representing the comparison operation.
+     * @param date The date value in epoch days to be used in the comparison.
+     * @param columnTypeProvider Provides the column types based on column handles.
+     * @param timestampCreator A function to create a timestamp object from epoch milliseconds.
+     * @param typeValidator A predicate to validate if the provided type is acceptable for the operation.
+     * @return An Optional containing the Domain if it can be successfully created, otherwise an empty Optional.
+     */
+    private static <C, T> Optional<Domain> unwrapTimestampCastToDomain(
+            C column,
+            FunctionName functionName,
+            long date,
+            ColumnTypeProvider<C> columnTypeProvider,
+            Function<Long, T> timestampCreator,
+            Predicate<Type> typeValidator)
+    {
+
         Type type = columnTypeProvider.getType(column).orElseThrow();
-        checkArgument(type.equals(TIMESTAMP_TZ_MICROS), "Column of unexpected type %s: %s", type, column);
+        checkArgument(typeValidator.test(type), "Column of unexpected type %s: %s", type, column);
 
         // Verify no overflow. Date values must be in integer range.
         verify(date <= Integer.MAX_VALUE, "Date value out of range: %s", date);
 
-        // In the Connector, timestamp with time zone values are all in UTC
-
-        LongTimestampWithTimeZone startOfDate = LongTimestampWithTimeZone.fromEpochMillisAndFraction(date * MILLISECONDS_PER_DAY, 0, UTC_KEY);
-        LongTimestampWithTimeZone startOfNextDate = LongTimestampWithTimeZone.fromEpochMillisAndFraction((date + 1) * MILLISECONDS_PER_DAY, 0, UTC_KEY);
+        T startOfDate = timestampCreator.apply(date);
+        T startOfNextDate = timestampCreator.apply((date + 1));
 
         return createDomain(functionName, type, startOfDate, startOfNextDate);
     }
@@ -330,17 +403,18 @@ public final class ConstraintExtractor
     }
 
     /**
-     * Creates a domain based on the given function name, type, start of date, and start of next date.
+     * Creates a Domain based on the given parameters.
      *
-     * @param functionName the name of the function used to create the domain
-     * @param type the type of the domain
-     * @param startOfDate the start of the date range
-     * @param startOfNextDate the start of the next date range
-     * @return an Optional containing the created Domain, or an empty Optional if the domain cannot be created
+     * @param functionName      the name of the function
+     * @param type              the Type object representing the type of the Domain
+     * @param startOfDate       the start of the date range
+     * @param startOfNextDate   the start of the next date range
+     * @param <T>               the type of the startOfDate and startOfNextDate parameters
+     * @return an Optional object containing the created Domain, or an empty Optional if the function name is not supported
      */
-    private static Optional<Domain> createDomain(FunctionName functionName, Type type, LongTimestampWithTimeZone startOfDate, LongTimestampWithTimeZone startOfNextDate)
+    private static <T> Optional<Domain> createDomain(FunctionName functionName, Type type, T startOfDate, T startOfNextDate)
     {
-        Map<FunctionName, DomainCreator> domainCreators = Map.of(
+        Map<FunctionName, DomainCreator<T>> domainCreators = Map.of(
                 EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.range(t, s, true, e, false)), false)),
                 NOT_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), false)),
                 LESS_THAN_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s)), false)),
@@ -356,20 +430,14 @@ public final class ConstraintExtractor
     }
 
     /**
-     * This functional interface represents a domain creator that creates a new {@link Domain} with the specified type, start, and end timestamps.
+     * This functional interface represents a domain creator which is used to create a domain object.
+     *
+     * @param <T> the type of the start and end values
      */
     @FunctionalInterface
-    private interface DomainCreator
+    private interface DomainCreator<T>
     {
-        /**
-         * Creates a new {@link Domain} with the specified type, start, and end timestamps.
-         *
-         * @param type The type of the domain.
-         * @param start The start timestamp of the domain.
-         * @param end The end timestamp of the domain.
-         * @return An optional containing the created domain, or an empty optional if the creation fails.
-         */
-        Optional<Domain> create(Type type, LongTimestampWithTimeZone start, LongTimestampWithTimeZone end);
+        Optional<Domain> create(Type type, T start, T end);
     }
 
     /**
