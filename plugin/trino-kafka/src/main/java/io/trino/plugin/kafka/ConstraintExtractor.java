@@ -337,7 +337,7 @@ public final class ConstraintExtractor
                 functionName,
                 date,
                 columnTypeProvider,
-                d -> new LongTimestamp(d * MICROSECONDS_PER_DAY, 0),
+                d -> d * MICROSECONDS_PER_DAY,
                 type -> type.equals(TIMESTAMP_MILLIS));
     }
 
@@ -480,8 +480,16 @@ public final class ConstraintExtractor
         C column = resolve(sourceVariable, assignments);
         Optional<Type> columnType = columnTypeProvider.getType(column);
         if (columnType.isPresent() && columnType.get()  instanceof TimestampWithTimeZoneType type) {
-            // Iceberg supports only timestamp(6) with time zone
+            // Connector supports only timestamp(6) with time zone
             checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
+            verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
+
+            return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)
+                    .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
+        }
+        if (columnType.isPresent() && columnType.get()  instanceof TimestampType type) {
+            // Connector supports only timestamp(6) with time zone
+            checkArgument(type.getPrecision() == 3, "Unexpected type: %s", columnType);
             verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
 
             return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)

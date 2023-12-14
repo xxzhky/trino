@@ -59,6 +59,8 @@ import static io.trino.spi.type.DateType.DATE;
 import static io.trino.spi.type.TimeZoneKey.UTC_KEY;
 import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MICROS;
+import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_DAY;
+import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_SECOND;
 import static io.trino.spi.type.Timestamps.MILLISECONDS_PER_DAY;
 import static io.trino.spi.type.Timestamps.MILLISECONDS_PER_SECOND;
 import static io.trino.spi.type.Timestamps.PICOSECONDS_PER_MICROSECOND;
@@ -106,7 +108,7 @@ public class TestConstraintExtractor
     /**
      * Test equivalent of {@link UnwrapCastInComparison} for {@link TimestampWithTimeZoneType}.
      * {@link UnwrapCastInComparison} handles {@link DateType} and {@link TimestampType}, but cannot handle
-     * {@link TimestampWithTimeZoneType}. Such unwrap would not be monotonic. Within Iceberg, we know
+     * {@link TimestampWithTimeZoneType}. Such unwrap would not be monotonic. Within Connector, we know
      * that {@link TimestampWithTimeZoneType} is always in UTC zone (point in time, with no time zone information),
      * so we can unwrap.
      */
@@ -172,10 +174,72 @@ public class TestConstraintExtractor
                         true))));
     }
 
+    @Test
+    public void testExtractTimestampDateComparison()
+    {
+        String timestampColumnSymbol = "timestamp_symbol";
+        Cast castOfColumn = new Cast(new SymbolReference(timestampColumnSymbol), toSqlType(DATE));
+
+        LocalDate someDate = LocalDate.of(2005, 9, 10);
+        Expression someDateExpression = LITERAL_ENCODER.toExpression(someDate.toEpochDay(), DATE);
+
+        long startOfDateUtcEpochMillis = someDate.atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
+        Long startOfDate = startOfDateUtcEpochMillis;
+        Long startOfNextDate = (startOfDateUtcEpochMillis + MICROSECONDS_PER_DAY);
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(EQUAL, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.range(TIMESTAMP_MILLIS, startOfDate, true, startOfNextDate, false)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(NOT_EQUAL, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(
+                        Range.lessThan(TIMESTAMP_MILLIS, startOfDate),
+                        Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDate)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(LESS_THAN, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfDate)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(LESS_THAN_OR_EQUAL, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfNextDate)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(GREATER_THAN, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDate)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(GREATER_THAN_OR_EQUAL, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfDate)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(IS_DISTINCT_FROM, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, Domain.create(
+                        ValueSet.ofRanges(
+                                Range.lessThan(TIMESTAMP_MILLIS, startOfDate),
+                                Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDate)),
+                        true))));
+    }
+
     /**
      * Test equivalent of {@link UnwrapDateTruncInComparison} for {@link TimestampWithTimeZoneType}.
      * {@link UnwrapDateTruncInComparison} handles {@link DateType} and {@link TimestampType}, but cannot handle
-     * {@link TimestampWithTimeZoneType}. Such unwrap would not be monotonic. Within Iceberg, we know
+     * {@link TimestampWithTimeZoneType}. Such unwrap would not be monotonic. Within Connector, we know
      * that {@link TimestampWithTimeZoneType} is always in UTC zone (point in time, with no time zone information),
      * so we can unwrap.
      */
@@ -259,7 +323,7 @@ public class TestConstraintExtractor
     /**
      * Test equivalent of {@link UnwrapYearInComparison} for {@link TimestampWithTimeZoneType}.
      * {@link UnwrapYearInComparison} handles {@link DateType} and {@link TimestampType}, but cannot handle
-     * {@link TimestampWithTimeZoneType}. Such unwrap would not be monotonic. Within Iceberg, we know
+     * {@link TimestampWithTimeZoneType}. Such unwrap would not be monotonic. Within Connector, we know
      * that {@link TimestampWithTimeZoneType} is always in UTC zone (point in time, with no time zone information),
      * so we can unwrap.
      */
