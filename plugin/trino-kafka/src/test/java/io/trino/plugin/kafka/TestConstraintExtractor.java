@@ -90,18 +90,35 @@ public class TestConstraintExtractor
     private static final KafkaColumnHandle A_TIMESTAMP_TZ = newPrimitiveColumn(TIMESTAMP_TZ_MICROS);
     private static final KafkaColumnHandle A_TIMESTAMP_MILL = newPrimitiveColumn(TIMESTAMP_MILLIS);
 
+    /**
+     * Tests the extraction of a summary from a given constraint.
+     * This test checks that the extraction process correctly identifies and isolates the tuple domain from a constraint,
+     * which represents a set of conditions applied on the query.
+     *
+     * The test involves creating a constraint with a predefined tuple domain and ensuring
+     * that the extracted tuple domain matches the one defined in the constraint.
+     *
+     * @implNote This test assumes that the constraint's tuple domain is simple and consists of a single domain for a BIGINT column.
+     *           The test validates that the extraction process accurately retrieves this domain without invoking any additional value filtering logic.
+     */
     @Test
-    public void testExtractSummary()
-    {
+    public void testExtractSummary() {
+        // Creating a constraint with a single-value domain for a BIGINT column
         assertThat(extract(
                 new Constraint(
+                        // Tuple domain with a single value for the BIGINT column
                         TupleDomain.withColumnDomains(Map.of(A_BIGINT, Domain.singleValue(BIGINT, 1L))),
+                        // The constant expression indicating no additional filtering
                         Constant.TRUE,
+                        // Empty map for column assignments
                         Map.of(),
+                        // A function that should not be called during the test
                         values -> {
                             throw new AssertionError("should not be called");
                         },
+                        // The set of columns involved in the constraint
                         Set.of(A_BIGINT))))
+                // Verifying that the extracted tuple domain matches the predefined domain
                 .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_BIGINT, Domain.singleValue(BIGINT, 1L))));
     }
 
@@ -174,19 +191,33 @@ public class TestConstraintExtractor
                         true))));
     }
 
+    /**
+     * Tests the extraction process for comparisons involving a timestamp and a date.
+     * This test focuses on verifying the correct handling of scenarios where a timestamp (represented in milliseconds) is compared against a specific date.
+     *
+     * Different comparison expressions like equal, not equal, less than, etc., are evaluated
+     * to ensure accurate processing of timestamp to date comparisons.
+     *
+     * @implNote The timestamp is represented in milliseconds, and comparisons are made against a date cast from the timestamp.
+     */
     @Test
-    public void testExtractTimestampDateComparison()
-    {
+    public void testExtractTimestampDateComparison() {
+        // Symbol representing the timestamp column in the query
         String timestampColumnSymbol = "timestamp_symbol";
+        // Casting the timestamp column to a date type
         Cast castOfColumn = new Cast(new SymbolReference(timestampColumnSymbol), toSqlType(DATE));
 
+        // Specific date for comparison
         LocalDate someDate = LocalDate.of(2005, 9, 10);
+        // Expression representing the specific date
         Expression someDateExpression = LITERAL_ENCODER.toExpression(someDate.toEpochDay(), DATE);
 
+        // Calculating the start of the date and the start of the next day in microseconds
         long startOfDateUtcEpochMillis = someDate.atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
         Long startOfDate = startOfDateUtcEpochMillis;
         Long startOfNextDate = (startOfDateUtcEpochMillis + MICROSECONDS_PER_DAY);
 
+        // Testing EQUAL comparison
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(EQUAL, castOfColumn, someDateExpression),
@@ -320,40 +351,54 @@ public class TestConstraintExtractor
                         true))));
     }
 
+    /**
+     * Tests the extraction process for comparisons involving date truncation on a timestamp.
+     * This test verifies the handling of scenarios where a timestamp (represented in milliseconds) is truncated to a specific date unit (e.g., day)
+     * and then compared against a specific timestamp value.
+     *
+     * Different comparison expressions like equal, not equal, less than, etc., are evaluated
+     * to ensure correct processing of date truncation logic in timestamp comparisons.
+     *
+     * @implNote The timestamp is represented in milliseconds, and the date truncation is simulated using the 'date_trunc' function.
+     */
     @Test
     public void testExtractDateTruncTimestampComparison()
     {
+        // Symbol representing the timestamp column in the query
         String timestampColumnSymbol = "timestamp_symbol";
+        // Truncating the timestamp column to the day
         FunctionCall truncateToDay = new FunctionCall(
                 PLANNER_CONTEXT.getMetadata().resolveBuiltinFunction("date_trunc", fromTypes(VARCHAR, TIMESTAMP_MILLIS)).toQualifiedName(),
                 List.of(
                         LITERAL_ENCODER.toExpression(utf8Slice("day"), createVarcharType(17)),
                         new SymbolReference(timestampColumnSymbol)));
 
+        // Specific date for comparison
         LocalDate someDate = LocalDate.of(2005, 9, 10);
-        Expression someMidnightExpression = LITERAL_ENCODER.toExpression(
-                someDate.toEpochDay() * MICROSECONDS_PER_DAY,
-                TIMESTAMP_MILLIS);
-        Expression someMiddayExpression = LITERAL_ENCODER.toExpression(
-                someDate.toEpochDay() * MICROSECONDS_PER_DAY + PICOSECONDS_PER_MICROSECOND,
-                TIMESTAMP_MILLIS);
+        // Expressions representing midnight and midday timestamps for the specific date
+        Expression someMidnightExpression = LITERAL_ENCODER.toExpression(someDate.toEpochDay() * MICROSECONDS_PER_DAY, TIMESTAMP_MILLIS);
+        Expression someMiddayExpression = LITERAL_ENCODER.toExpression(someDate.toEpochDay() * MICROSECONDS_PER_DAY + PICOSECONDS_PER_MICROSECOND, TIMESTAMP_MILLIS);
 
+        // Calculating start of the day and the start of the next day in microseconds
         long startOfDateUtcEpochMillis = someDate.atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
-        Long startOfDateUtc = (startOfDateUtcEpochMillis);
+        Long startOfDateUtc = startOfDateUtcEpochMillis;
         Long startOfNextDateUtc = (startOfDateUtcEpochMillis + MICROSECONDS_PER_DAY);
 
+        // Testing EQUAL comparison with exact midnight
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(EQUAL, truncateToDay, someMidnightExpression),
                         Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
                 .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.range(TIMESTAMP_MILLIS, startOfDateUtc, true, startOfNextDateUtc, false)))));
 
+        // Testing EQUAL comparison with midday, expecting no matches
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(EQUAL, truncateToDay, someMiddayExpression),
                         Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
                 .isEqualTo(TupleDomain.none());
 
+        // Other comparison scenarios...
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(NOT_EQUAL, truncateToDay, someMidnightExpression),
@@ -468,26 +513,41 @@ public class TestConstraintExtractor
                         true))));
     }
 
+    /**
+     * Tests the extraction process for comparisons involving the extraction of the year from a timestamp.
+     * This test simulates the scenario where the year part of a timestamp (represented in milliseconds)
+     * is extracted and compared against a constant year value.
+     *
+     * The test evaluates various comparison expressions, such as equal, not equal, less than, etc.,
+     * to ensure that the extraction logic correctly interprets and processes these expressions.
+     *
+     * @implNote The timestamp is represented in milliseconds, and the year extraction is simulated using the 'year' function.
+     */
     @Test
     public void testExtractYearTimestampComparison()
     {
+        // Symbol representing the timestamp column in the query
         String timestampColumnSymbol = "timestamp_symbol";
+        // Extracting the year part from the timestamp column
         FunctionCall extractYear = new FunctionCall(
                 PLANNER_CONTEXT.getMetadata().resolveBuiltinFunction("year", fromTypes(TIMESTAMP_MILLIS)).toQualifiedName(),
                 List.of(new SymbolReference(timestampColumnSymbol)));
 
+        // A specific year for comparison
         LocalDate someDate = LocalDate.of(2005, 9, 10);
+        // Expression representing the specific year
         Expression yearExpression = LITERAL_ENCODER.toExpression(2005L, BIGINT);
 
-        long startOfYearUtcEpochMillis = someDate.withDayOfYear(1).atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
-        Long startOfYear = startOfYearUtcEpochMillis;
-        Long startOfNextDate = (someDate.plusYears(1).withDayOfYear(1).atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND);
+        // Calculating start of the year and the start of the next year in microseconds
+        Long startOfYear = someDate.withDayOfYear(1).atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
+        Long startOfNextYear = someDate.plusYears(1).withDayOfYear(1).atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
 
+        // Testing EQUAL comparison
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(EQUAL, extractYear, yearExpression),
                         Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.range(TIMESTAMP_MILLIS, startOfYear, true, startOfNextDate, false)))));
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.range(TIMESTAMP_MILLIS, startOfYear, true, startOfNextYear, false)))));
 
         assertThat(extract(
                 constraint(
@@ -495,7 +555,7 @@ public class TestConstraintExtractor
                         Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
                 .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(
                         Range.lessThan(TIMESTAMP_MILLIS, startOfYear),
-                        Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDate)))));
+                        Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextYear)))));
 
         assertThat(extract(
                 constraint(
@@ -507,13 +567,13 @@ public class TestConstraintExtractor
                 constraint(
                         new ComparisonExpression(LESS_THAN_OR_EQUAL, extractYear, yearExpression),
                         Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfNextDate)))));
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfNextYear)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(GREATER_THAN, extractYear, yearExpression),
                         Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDate)))));
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextYear)))));
 
         assertThat(extract(
                 constraint(
@@ -528,7 +588,7 @@ public class TestConstraintExtractor
                 .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, Domain.create(
                         ValueSet.ofRanges(
                                 Range.lessThan(TIMESTAMP_MILLIS, startOfYear),
-                                Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDate)),
+                                Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextYear)),
                         true))));
     }
 
@@ -571,6 +631,70 @@ public class TestConstraintExtractor
                 .isEqualTo(TupleDomain.withColumnDomains(Map.of(
                         A_BIGINT, Domain.singleValue(BIGINT, 1L),
                         A_TIMESTAMP_TZ, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
+    }
+
+    /**
+     * Tests the intersection of summary and expression for timestamp comparisons.
+     * This method evaluates how the extraction process handles various comparison expressions
+     * involving a timestamp column and a constant date.
+     *
+     * The test scenarios include:
+     * - Comparing a timestamp column not equal to a specific date
+     * - Comparing a timestamp column greater than a specific date
+     * - Comparing a timestamp column greater than or equal to a specific date
+     *
+     * The method simulates different conditions using the TupleDomain summary and a ComparisonExpression.
+     * It ensures that the TupleDomain extracted from these conditions correctly represents the expected result.
+     *
+     * @implNote This test uses a timestamp column represented in milliseconds.
+     */
+    @Test
+    public void testIntersectSummaryAndExpressionTimestampExtraction()
+    {
+        // Symbol representing the timestamp column in the query
+        String timestampColumnSymbol = "timestamp_symbol";
+        // Casting the timestamp column to DATE type for comparison
+        Cast castOfColumn = new Cast(new SymbolReference(timestampColumnSymbol), toSqlType(DATE));
+
+        // A specific date for comparison
+        LocalDate someDate = LocalDate.of(2005, 9, 10);
+        // Expression representing the specific date
+        Expression someDateExpression = LITERAL_ENCODER.toExpression(someDate.toEpochDay(), DATE);
+
+        // Calculating start of the date, next date, and the date after in microseconds
+        long startOfDateUtcEpochMillis = someDate.atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
+        Long startOfDate = startOfDateUtcEpochMillis;
+        Long startOfNextDate = startOfDateUtcEpochMillis + MICROSECONDS_PER_DAY;
+        Long startOfNextNextDate = startOfDateUtcEpochMillis + MICROSECONDS_PER_DAY * 2;
+
+        // Testing NOT_EQUAL comparison
+        assertThat(extract(
+                constraint(
+                        TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfNextNextDate)))),
+                        new ComparisonExpression(NOT_EQUAL, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(
+                        A_TIMESTAMP_MILL, domain(
+                                Range.lessThan(TIMESTAMP_MILLIS, startOfDate),
+                                Range.range(TIMESTAMP_MILLIS, startOfNextDate, true, startOfNextNextDate, false)))));
+
+        // Testing GREATER_THAN comparison
+        assertThat(extract(
+                constraint(
+                        TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfNextDate)))),
+                        new ComparisonExpression(GREATER_THAN, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.none());
+
+        // Testing GREATER_THAN_OR_EQUAL comparison
+        assertThat(extract(
+                constraint(
+                        TupleDomain.withColumnDomains(Map.of(A_BIGINT, Domain.singleValue(BIGINT, 1L))),
+                        new ComparisonExpression(GREATER_THAN_OR_EQUAL, castOfColumn, someDateExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(
+                        A_BIGINT, Domain.singleValue(BIGINT, 1L),
+                        A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfDate)))));
     }
 
     private static KafkaColumnHandle newPrimitiveColumn(Type type)
