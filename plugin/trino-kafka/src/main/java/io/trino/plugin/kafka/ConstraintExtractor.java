@@ -201,7 +201,8 @@ public final class ConstraintExtractor
             if (firstArgument instanceof Call firstAsCall &&
                     firstAsCall.getFunctionName().equals(new FunctionName("year")) &&
                     firstAsCall.getArguments().size() == 1 &&
-                    getOnlyElement(firstAsCall.getArguments()).getType() instanceof TimestampWithTimeZoneType &&
+                    (getOnlyElement(firstAsCall.getArguments()).getType() instanceof TimestampWithTimeZoneType ||
+                            getOnlyElement(firstAsCall.getArguments()).getType() instanceof TimestampType) &&
                     secondArgument instanceof Constant constant &&
                     // if types do no match, this cannot be a comparison function
                     firstArgument.getType().equals(secondArgument.getType())) {
@@ -382,24 +383,23 @@ public final class ConstraintExtractor
      * Unwraps the year in a comparison between a timestamp with time zone column
      * and a constant.
      *
-     * @param <C> the type of the column handle
      * @param functionName the name of the function being evaluated
      * @param type the type of the timestamp with time zone column
      * @param constant the constant value being compared against
      * @return an Optional containing the unwrapped domain if the constant value is not null
      * and the type of the column is TIMESTAMP_TZ_MICROS, otherwise an empty Optional
      */
-    private static <C> Optional<Domain> unwrapYearInTimestampTzComparison(FunctionName functionName, Type type, Constant constant)
+    private static <T> Optional<Domain> unwrapYearInTimestampTzComparison(FunctionName functionName, Type type, Constant constant, Function<ZonedDateTime, T> timestampCalculator)
     {
         checkArgument(constant.getValue() != null, "Unexpected constant: %s", constant);
-        checkArgument(type.equals(TIMESTAMP_TZ_MICROS), "Unexpected type: %s", type);
+        //checkArgument(type.equals(TIMESTAMP_TZ_MICROS), "Unexpected type: %s", type);
 
         int year = toIntExact((Long) constant.getValue());
         ZonedDateTime periodStart = ZonedDateTime.of(year, 1, 1, 0, 0, 0, 0, UTC);
         ZonedDateTime periodEnd = periodStart.plusYears(1);
 
-        LongTimestampWithTimeZone start = LongTimestampWithTimeZone.fromEpochSecondsAndFraction(periodStart.toEpochSecond(), 0, UTC_KEY);
-        LongTimestampWithTimeZone end = LongTimestampWithTimeZone.fromEpochSecondsAndFraction(periodEnd.toEpochSecond(), 0, UTC_KEY);
+        T start = timestampCalculator.apply(periodStart);
+        T end = timestampCalculator.apply(periodEnd);
 
         return createDomain(functionName, type, start, end);
     }
@@ -704,16 +704,20 @@ public final class ConstraintExtractor
         }
 
         C column = resolve(sourceVariable, assignments);
-        Optional<Type> columnType = columnTypeProvider.getType(column);
-        if (columnType.isPresent() && columnType.get()  instanceof TimestampWithTimeZoneType type) {
-            // Iceberg supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
 
-            return unwrapYearInTimestampTzComparison(functionName, type, constant)
-                    .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
-        }
-
-        return Optional.empty();
+        return columnTypeProvider.getType(column)
+                .flatMap(type -> {
+                    if (type instanceof TimestampWithTimeZoneType ttzType && ttzType.getPrecision() == 6) {
+                        // Connector supports only timestamp(6) with time zone
+                        //checkArgument(ttzType.getPrecision() == 6, "Unexpected type: %s", type);
+                        return unwrapYearInTimestampTzComparison(functionName, type, constant, ConstraintExtractor::convertToLongTimestampWithTimeZone)
+                                .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
+                    } else if (type instanceof TimestampType tsType && tsType.getPrecision() == 3) {
+                        return unwrapYearInTimestampTzComparison(functionName, type, constant, zonedDateTime -> zonedDateTime.toEpochSecond() * MICROSECONDS_PER_SECOND)
+                                .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
+                    }
+                    return Optional.<TupleDomain<C>>empty();
+                });
     }
 
     /**
