@@ -87,7 +87,7 @@ public class TestConstraintExtractor
     private static final AtomicInteger nextColumnId = new AtomicInteger(1);
 
     private static final KafkaColumnHandle A_BIGINT = newPrimitiveColumn(BIGINT);
-    private static final KafkaColumnHandle A_TIMESTAMP_TZ_MICR = newPrimitiveColumn(TIMESTAMP_TZ_MICROS);
+    private static final KafkaColumnHandle A_TIMESTAMP_TZ = newPrimitiveColumn(TIMESTAMP_TZ_MICROS);
     private static final KafkaColumnHandle A_TIMESTAMP_MILL = newPrimitiveColumn(TIMESTAMP_MILLIS);
 
     @Test
@@ -128,46 +128,46 @@ public class TestConstraintExtractor
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(EQUAL, castOfColumn, someDateExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.range(TIMESTAMP_TZ_MICROS, startOfDateUtc, true, startOfNextDateUtc, false)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.range(TIMESTAMP_TZ_MICROS, startOfDateUtc, true, startOfNextDateUtc, false)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(NOT_EQUAL, castOfColumn, someDateExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(
                         Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc),
                         Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(LESS_THAN, castOfColumn, someDateExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(LESS_THAN_OR_EQUAL, castOfColumn, someDateExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(GREATER_THAN, castOfColumn, someDateExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(GREATER_THAN_OR_EQUAL, castOfColumn, someDateExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(IS_DISTINCT_FROM, castOfColumn, someDateExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, Domain.create(
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, Domain.create(
                         ValueSet.ofRanges(
                                 Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc),
                                 Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)),
@@ -268,55 +268,132 @@ public class TestConstraintExtractor
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(EQUAL, truncateToDay, someMidnightExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.range(TIMESTAMP_TZ_MICROS, startOfDateUtc, true, startOfNextDateUtc, false)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.range(TIMESTAMP_TZ_MICROS, startOfDateUtc, true, startOfNextDateUtc, false)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(EQUAL, truncateToDay, someMiddayExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
                 .isEqualTo(TupleDomain.none());
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(NOT_EQUAL, truncateToDay, someMidnightExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(
                         Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc),
                         Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(LESS_THAN, truncateToDay, someMidnightExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(LESS_THAN_OR_EQUAL, truncateToDay, someMidnightExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.lessThan(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(GREATER_THAN, truncateToDay, someMidnightExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(GREATER_THAN_OR_EQUAL, truncateToDay, someMidnightExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, domain(Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfDateUtc)))));
 
         assertThat(extract(
                 constraint(
                         new ComparisonExpression(IS_DISTINCT_FROM, truncateToDay, someMidnightExpression),
-                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_MILL))))
-                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, Domain.create(
+                        Map.of(timestampTzColumnSymbol, A_TIMESTAMP_TZ))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_TZ, Domain.create(
                         ValueSet.ofRanges(
                                 Range.lessThan(TIMESTAMP_TZ_MICROS, startOfDateUtc),
                                 Range.greaterThanOrEqual(TIMESTAMP_TZ_MICROS, startOfNextDateUtc)),
+                        true))));
+    }
+
+    @Test
+    public void testExtractDateTruncTimestampComparison()
+    {
+        String timestampColumnSymbol = "timestamp_symbol";
+        FunctionCall truncateToDay = new FunctionCall(
+                PLANNER_CONTEXT.getMetadata().resolveBuiltinFunction("date_trunc", fromTypes(VARCHAR, TIMESTAMP_MILLIS)).toQualifiedName(),
+                List.of(
+                        LITERAL_ENCODER.toExpression(utf8Slice("day"), createVarcharType(17)),
+                        new SymbolReference(timestampColumnSymbol)));
+
+        LocalDate someDate = LocalDate.of(2005, 9, 10);
+        Expression someMidnightExpression = LITERAL_ENCODER.toExpression(
+                someDate.toEpochDay() * MICROSECONDS_PER_DAY,
+                TIMESTAMP_MILLIS);
+        Expression someMiddayExpression = LITERAL_ENCODER.toExpression(
+                someDate.toEpochDay() * MICROSECONDS_PER_DAY + PICOSECONDS_PER_MICROSECOND,
+                TIMESTAMP_MILLIS);
+
+        long startOfDateUtcEpochMillis = someDate.atStartOfDay().toEpochSecond(UTC) * MICROSECONDS_PER_SECOND;
+        Long startOfDateUtc = (startOfDateUtcEpochMillis);
+        Long startOfNextDateUtc = (startOfDateUtcEpochMillis + MICROSECONDS_PER_DAY);
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(EQUAL, truncateToDay, someMidnightExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.range(TIMESTAMP_MILLIS, startOfDateUtc, true, startOfNextDateUtc, false)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(EQUAL, truncateToDay, someMiddayExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.none());
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(NOT_EQUAL, truncateToDay, someMidnightExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(
+                        Range.lessThan(TIMESTAMP_MILLIS, startOfDateUtc),
+                        Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDateUtc)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(LESS_THAN, truncateToDay, someMidnightExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfDateUtc)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(LESS_THAN_OR_EQUAL, truncateToDay, someMidnightExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.lessThan(TIMESTAMP_MILLIS, startOfNextDateUtc)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(GREATER_THAN, truncateToDay, someMidnightExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDateUtc)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(GREATER_THAN_OR_EQUAL, truncateToDay, someMidnightExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, domain(Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfDateUtc)))));
+
+        assertThat(extract(
+                constraint(
+                        new ComparisonExpression(IS_DISTINCT_FROM, truncateToDay, someMidnightExpression),
+                        Map.of(timestampColumnSymbol, A_TIMESTAMP_MILL))))
+                .isEqualTo(TupleDomain.withColumnDomains(Map.of(A_TIMESTAMP_MILL, Domain.create(
+                        ValueSet.ofRanges(
+                                Range.lessThan(TIMESTAMP_MILLIS, startOfDateUtc),
+                                Range.greaterThanOrEqual(TIMESTAMP_MILLIS, startOfNextDateUtc)),
                         true))));
     }
 

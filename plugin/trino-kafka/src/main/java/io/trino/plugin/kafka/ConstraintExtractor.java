@@ -29,15 +29,14 @@ import io.trino.spi.predicate.Range;
 import io.trino.spi.predicate.TupleDomain;
 import io.trino.spi.predicate.ValueSet;
 import io.trino.spi.type.DateType;
-import io.trino.spi.type.LongTimestamp;
 import io.trino.spi.type.LongTimestampWithTimeZone;
 import io.trino.spi.type.TimestampType;
 import io.trino.spi.type.TimestampWithTimeZoneType;
 import io.trino.spi.type.Type;
 
 import java.time.Instant;
-import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.time.temporal.TemporalUnit;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -60,7 +59,10 @@ import static io.trino.spi.type.TimeZoneKey.UTC_KEY;
 import static io.trino.spi.type.TimestampType.TIMESTAMP_MILLIS;
 import static io.trino.spi.type.TimestampWithTimeZoneType.TIMESTAMP_TZ_MICROS;
 import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_DAY;
+import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_MILLISECOND;
+import static io.trino.spi.type.Timestamps.MICROSECONDS_PER_SECOND;
 import static io.trino.spi.type.Timestamps.MILLISECONDS_PER_DAY;
+import static io.trino.spi.type.Timestamps.NANOSECONDS_PER_MICROSECOND;
 import static io.trino.spi.type.Timestamps.PICOSECONDS_PER_NANOSECOND;
 import static java.lang.Math.toIntExact;
 import static java.math.RoundingMode.UNNECESSARY;
@@ -478,103 +480,29 @@ public final class ConstraintExtractor
         }
 
         C column = resolve(sourceVariable, assignments);
-        Optional<Type> columnType = columnTypeProvider.getType(column);
-        if (columnType.isPresent() && columnType.get()  instanceof TimestampWithTimeZoneType type) {
-            // Connector supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 6, "Unexpected type: %s", columnType);
-            verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
+        return columnTypeProvider.getType(column)
+                .flatMap(
+                        columnType -> {
+                            // Connector supports only timestamp(6) with time zone
+                            if (columnType instanceof TimestampWithTimeZoneType tztType && tztType.getPrecision() == 6 && constant.getType().equals(tztType)) {
+                                //checkArgument(tztType.getPrecision() == 6, "Unexpected type: %s", columnType);
+                                //verify(constant.getType().equals(tztType), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
 
-            return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)
-                    .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
-        }
-        if (columnType.isPresent() && columnType.get()  instanceof TimestampType type) {
-            // Connector supports only timestamp(6) with time zone
-            checkArgument(type.getPrecision() == 3, "Unexpected type: %s", columnType);
-            verify(constant.getType().equals(type), "This method should not be invoked when type mismatch (i.e. surely not a comparison)");
-
-            return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(), functionName, constant)
-                    .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
-        }
-
-        return Optional.empty();
-    }
-
-    private static Optional<Domain> unwrapDateTruncInComparison0(String unit, FunctionName functionName, Constant constant)
-    {
-        Type type = constant.getType();
-        checkArgument(constant.getValue() != null, "Unexpected constant: %s", constant);
-        checkArgument(type.equals(TIMESTAMP_TZ_MICROS), "Unexpected type: %s", type);
-
-        // Normalized to UTC because for comparisons the zone is irrelevant
-        ZonedDateTime dateTime = Instant.ofEpochMilli(((LongTimestampWithTimeZone) constant.getValue()).getEpochMillis())
-                .plusNanos(LongMath.divide(((LongTimestampWithTimeZone) constant.getValue()).getPicosOfMilli(), PICOSECONDS_PER_NANOSECOND, UNNECESSARY))
-                .atZone(UTC);
-
-        ZonedDateTime periodStart;
-        ZonedDateTime nextPeriodStart;
-        switch (unit.toLowerCase(ENGLISH)) {
-            case "hour" -> {
-                periodStart = ZonedDateTime.of(dateTime.toLocalDate(), LocalTime.of(dateTime.getHour(), 0), UTC);
-                nextPeriodStart = periodStart.plusHours(1);
-            }
-            case "day" -> {
-                periodStart = dateTime.toLocalDate().atStartOfDay().atZone(UTC);
-                nextPeriodStart = periodStart.plusDays(1);
-            }
-            case "month" -> {
-                periodStart = dateTime.toLocalDate().withDayOfMonth(1).atStartOfDay().atZone(UTC);
-                nextPeriodStart = periodStart.plusMonths(1);
-            }
-            case "year" -> {
-                periodStart = dateTime.toLocalDate().withMonth(1).withDayOfMonth(1).atStartOfDay().atZone(UTC);
-                nextPeriodStart = periodStart.plusYears(1);
-            }
-            default -> {
-                return Optional.empty();
-            }
-        }
-        boolean constantAtPeriodStart = dateTime.equals(periodStart);
-
-        LongTimestampWithTimeZone start = LongTimestampWithTimeZone.fromEpochSecondsAndFraction(periodStart.toEpochSecond(), 0, UTC_KEY);
-        LongTimestampWithTimeZone end = LongTimestampWithTimeZone.fromEpochSecondsAndFraction(nextPeriodStart.toEpochSecond(), 0, UTC_KEY);
-
-        if (functionName.equals(EQUAL_OPERATOR_FUNCTION_NAME)) {
-            if (!constantAtPeriodStart) {
-                return Optional.of(Domain.none(type));
-            }
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.range(type, start, true, end, false)), false));
-        }
-        if (functionName.equals(NOT_EQUAL_OPERATOR_FUNCTION_NAME)) {
-            if (!constantAtPeriodStart) {
-                return Optional.of(Domain.notNull(type));
-            }
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, start), Range.greaterThanOrEqual(type, end)), false));
-        }
-        if (functionName.equals(IS_DISTINCT_FROM_OPERATOR_FUNCTION_NAME)) {
-            if (!constantAtPeriodStart) {
-                return Optional.of(Domain.all(type));
-            }
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, start), Range.greaterThanOrEqual(type, end)), true));
-        }
-        if (functionName.equals(LESS_THAN_OPERATOR_FUNCTION_NAME)) {
-            if (constantAtPeriodStart) {
-                return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, start)), false));
-            }
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, end)), false));
-        }
-        if (functionName.equals(LESS_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(type, end)), false));
-        }
-        if (functionName.equals(GREATER_THAN_OPERATOR_FUNCTION_NAME)) {
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(type, end)), false));
-        }
-        if (functionName.equals(GREATER_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME)) {
-            if (constantAtPeriodStart) {
-                return Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(type, start)), false));
-            }
-            return Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(type, end)), false));
-        }
-        return Optional.empty();
+                                return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(),
+                                        functionName,
+                                        constant,
+                                        ConstraintExtractor::convertToLongTimestampWithTimeZone)
+                                        .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
+                            } else if (columnType instanceof TimestampType tsType && tsType.getPrecision() == 3 && constant.getType().equals(tsType)) {
+                                return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(),
+                                        functionName,
+                                        constant,
+                                        zonedDateTime -> zonedDateTime.toEpochSecond() * MICROSECONDS_PER_SECOND)
+                                        .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
+                            }
+                            return Optional.<TupleDomain<C>>empty();
+                        }
+                );
     }
 
     /**
@@ -585,63 +513,102 @@ public final class ConstraintExtractor
      * @param unit The unit of date truncation (e.g., "hour", "day", "month", "year").
      * @param functionName The name of the function representing the comparison operation.
      * @param constant The constant value used in the comparison.
+     * @param timestampCalculator A function to convert ZonedDateTime to a specific timestamp type.
+     * @param <T> The type of the timestamp (e.g., LongTimestampWithTimeZone, Long).
      * @return An Optional containing the created Domain if the comparison can be unwrapped successfully, otherwise an empty Optional.
      *
-     * The method first checks if the constant is valid for this kind of comparison.
-     * It then converts the constant to a ZonedDateTime and calculates the start and end of the period based on the truncation unit.
-     * If a valid period can be determined, it converts the start and end times to LongTimestampWithTimeZone format.
-     * Finally, it calls 'createDomainBasedOnFunction' to create the appropriate domain for the given comparison function,
-     * taking into account whether the constant is at the start of the calculated period.
+     * The method first validates the constant for the specified timestamp type.
+     * Then, it converts the constant to a ZonedDateTime and calculates the start and end of the period based on the truncation unit.
+     * The start and end times are converted to the required timestamp type using the provided timestampCalculator.
+     * Finally, it invokes 'createDomainBasedOnFunction' to create the appropriate domain for the comparison function,
+     * considering whether the constant corresponds to the start of the calculated period.
      */
-    private static Optional<Domain> unwrapDateTruncInComparison(String unit, FunctionName functionName, Constant constant) {
+    private static <T> Optional<Domain> unwrapDateTruncInComparison(String unit,
+                                                                    FunctionName functionName,
+                                                                    Constant constant,
+                                                                    Function<ZonedDateTime, T> timestampCalculator)
+    {
+        // Validate constant for specified timestamp type
         if (!isValidConstant(constant)) {
             return Optional.empty();
         }
 
-        ZonedDateTime dateTime = convertConstantToZonedDateTime(constant);
-        PeriodInterval periodInterval = calculatePeriodInterval(unit, dateTime);
-        if (periodInterval == null) {
+        // Convert constant to ZonedDateTime
+        Optional<ZonedDateTime> dateTime = getZonedDateTimeFromConstant(constant);
+        if (dateTime.isEmpty()) {
             return Optional.empty();
         }
 
-        LongTimestampWithTimeZone startTimestamp = convertToLongTimestampWithTimeZone(periodInterval.start);
-        LongTimestampWithTimeZone endTimestamp = convertToLongTimestampWithTimeZone(periodInterval.end);
-        boolean isConstantAtPeriodStart = dateTime.equals(periodInterval.start);
+        // Calculate period interval based on the unit
+        Optional<PeriodInterval> periodInterval = calculatePeriodInterval(unit, dateTime.get());
+        if (periodInterval.isEmpty()) {
+            return Optional.empty();
+        }
 
+        // Convert start and end of period to the required timestamp type
+        T startTimestamp = timestampCalculator.apply(periodInterval.orElseThrow().start);
+        T endTimestamp = timestampCalculator.apply(periodInterval.orElseThrow().end);
+        boolean isConstantAtPeriodStart = dateTime.get().equals(periodInterval.get().start);
+
+        // Create the domain based on the function and the type of comparison
         return createDomainBasedOnFunction(functionName, constant.getType(),
                 startTimestamp, endTimestamp, isConstantAtPeriodStart);
     }
 
-    private static boolean isValidConstant(Constant constant) {
-        return constant.getValue() instanceof LongTimestampWithTimeZone &&
-                constant.getType().equals(TIMESTAMP_TZ_MICROS);
-    }
-
-    private static ZonedDateTime convertConstantToZonedDateTime(Constant constant) {
-        LongTimestampWithTimeZone timestamp = (LongTimestampWithTimeZone) constant.getValue();
-        return Instant.ofEpochMilli(timestamp.getEpochMillis())
-                .plusNanos(LongMath.divide(timestamp.getPicosOfMilli(), PICOSECONDS_PER_NANOSECOND, UNNECESSARY))
-                .atZone(UTC);
+    private static Optional<ZonedDateTime> getZonedDateTimeFromConstant(Constant constant)
+    {
+        final Map<Type, Function<Constant, ZonedDateTime>> TIMESTAMP_CONVERTERS = Map.of(
+                TIMESTAMP_TZ_MICROS, c -> {
+                    LongTimestampWithTimeZone timestamp = (LongTimestampWithTimeZone) c.getValue();
+                    return Instant.ofEpochMilli(timestamp.getEpochMillis())
+                            .plusNanos(LongMath.divide(timestamp.getPicosOfMilli(), PICOSECONDS_PER_NANOSECOND, UNNECESSARY))
+                            .atZone(UTC);
+                },
+                TIMESTAMP_MILLIS, c -> {
+                    Long timestamp = (Long) c.getValue();
+                    return Instant.ofEpochMilli(timestamp / MICROSECONDS_PER_MILLISECOND)
+                            .plusNanos(timestamp % MICROSECONDS_PER_MILLISECOND * NANOSECONDS_PER_MICROSECOND)
+                            .atZone(UTC);
+                }
+                // add more converter functions
+        );
+        return Optional.ofNullable(TIMESTAMP_CONVERTERS.get(constant.getType()))
+                .map(converter -> converter.apply(constant));
     }
 
     /**
-     * Calculates the period interval based on the given unit and dateTime.
+     * Validates if the constant is a valid timestamp of the specified type.
      *
-     * @param unit      the unit of time (hour, day, month, year)
-     * @param dateTime  the reference date and time
-     * @return the calculated PeriodInterval object, or null if the unit is invalid
+     * @param constant The constant to be validated.
+     * @return True if the constant is a valid timestamp of the specified type, otherwise false.
      */
-    private static PeriodInterval calculatePeriodInterval(String unit, ZonedDateTime dateTime) {
+    private static boolean isValidConstant(Constant constant)
+    {
+        //checkArgument(constant.getValue() != null, "Unexpected constant: %s", constant);
+        //checkArgument(constant.getType().equals(TIMESTAMP_TZ_MICROS), "Unexpected type: %s", constant.getType());
+        Map<Type, Predicate<Object>> TIMESTAMP_TYPE_VALIDATORS = Map.of(
+                TIMESTAMP_TZ_MICROS, value -> value instanceof LongTimestampWithTimeZone,
+                TIMESTAMP_MILLIS, value -> value instanceof Long
+                // Add more timestamp types and their corresponding validation logic here
+        );
+        return Optional.ofNullable(TIMESTAMP_TYPE_VALIDATORS.get(constant.getType()))
+                .map(validator -> validator.test(constant.getValue()))
+                .orElse(false);
+    }
+
+    private static Optional<PeriodInterval> calculatePeriodInterval(String unit, ZonedDateTime dateTime)
+    {
         return switch (unit.toLowerCase(ENGLISH)) {
-            case "hour" -> new PeriodInterval(dateTime, dateTime.plusHours(1));
-            case "day" -> new PeriodInterval(dateTime.toLocalDate().atStartOfDay(UTC), dateTime.plusDays(1));
-            case "month" -> new PeriodInterval(dateTime.toLocalDate().withDayOfMonth(1).atStartOfDay(UTC), dateTime.plusMonths(1));
-            case "year" -> new PeriodInterval(dateTime.toLocalDate().withDayOfMonth(1).withMonth(1).atStartOfDay(UTC), dateTime.plusYears(1));
-            default -> null;
+            case "hour" -> Optional.of(new PeriodInterval(dateTime, dateTime.plusHours(1)));
+            case "day" -> Optional.of(new PeriodInterval(dateTime.toLocalDate().atStartOfDay(UTC), dateTime.plusDays(1)));
+            case "month" -> Optional.of(new PeriodInterval(dateTime.toLocalDate().withDayOfMonth(1).atStartOfDay(UTC), dateTime.plusMonths(1)));
+            case "year" -> Optional.of(new PeriodInterval(dateTime.toLocalDate().withDayOfMonth(1).withMonth(1).atStartOfDay(UTC), dateTime.plusYears(1)));
+            default -> Optional.empty();
         };
     }
 
-    private static LongTimestampWithTimeZone convertToLongTimestampWithTimeZone(ZonedDateTime zonedDateTime) {
+    private static LongTimestampWithTimeZone convertToLongTimestampWithTimeZone(ZonedDateTime zonedDateTime)
+    {
         return LongTimestampWithTimeZone.fromEpochSecondsAndFraction(zonedDateTime.toEpochSecond(), 0, UTC_KEY);
     }
 
@@ -657,10 +624,11 @@ public final class ConstraintExtractor
      * @param isConstantAtPeriodStart A boolean flag indicating if the constant is at the start of the period.
      * @return An Optional containing the created Domain if a matching domain creator is found; otherwise, an empty Optional.
      */
-    private static Optional<Domain> createDomainBasedOnFunction(FunctionName functionName, Type type,
-                                                                LongTimestampWithTimeZone start, LongTimestampWithTimeZone end,
-                                                                boolean isConstantAtPeriodStart) {
-        Map<FunctionName, ComparisonDomainCreator> domainCreators = Map.of(
+    private static <T> Optional<Domain> createDomainBasedOnFunction(FunctionName functionName, Type type,
+                                                                T start, T end,
+                                                                boolean isConstantAtPeriodStart)
+    {
+        Map<FunctionName, ComparisonDomainCreator<T>> domainCreators = Map.of(
                 EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> atStart
                         ? Optional.of(Domain.create(ValueSet.ofRanges(Range.range(t, s, true, e, false)), false))
                         : Optional.of(Domain.none(t)),
@@ -685,14 +653,16 @@ public final class ConstraintExtractor
      * Represents a functional interface for creating a comparison domain.
      */
     @FunctionalInterface
-    private interface ComparisonDomainCreator {
-        Optional<Domain> create(Type type, LongTimestampWithTimeZone start, LongTimestampWithTimeZone end, boolean isConstantAtPeriodStart);
+    private interface ComparisonDomainCreator<T>
+    {
+        Optional<Domain> create(Type type, T start, T end, boolean isConstantAtPeriodStart);
     }
 
     /**
      * Represents a time interval defined by a start and end {@link ZonedDateTime}.
      */
-    private static class PeriodInterval {
+    private static class PeriodInterval
+    {
         ZonedDateTime start;
         ZonedDateTime end;
 
@@ -755,7 +725,8 @@ public final class ConstraintExtractor
      * @return the corresponding ColumnHandle assignment for the Variable
      * @throws IllegalArgumentException if no assignment is found for the Variable
      */
-    private static <C> C resolve(Variable variable, Map<String, ColumnHandle> assignments) {
+    private static <C> C resolve(Variable variable, Map<String, ColumnHandle> assignments)
+    {
         ColumnHandle columnHandle = assignments.get(variable.getName());
         checkArgument(columnHandle != null, "No assignment for %s", variable);
         return (C) columnHandle;
