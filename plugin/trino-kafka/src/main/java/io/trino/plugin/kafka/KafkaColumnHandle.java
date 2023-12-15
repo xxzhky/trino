@@ -149,7 +149,8 @@ public final class KafkaColumnHandle
      *
      * @return An Optional containing the column's type if it's internal, or an empty Optional otherwise.
      */
-    public Optional<Type> getColumnTypeIfInternal() {
+    public Optional<Type> getColumnTypeIfInternal()
+    {
         return isInternal() ? Optional.of(getType()) : Optional.empty();
     }
 

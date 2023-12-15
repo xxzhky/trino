@@ -102,7 +102,8 @@ public class TestConstraintExtractor
      *           The test validates that the extraction process accurately retrieves this domain without invoking any additional value filtering logic.
      */
     @Test
-    public void testExtractSummary() {
+    public void testExtractSummary()
+    {
         // Creating a constraint with a single-value domain for a BIGINT column
         assertThat(extract(
                 new Constraint(
@@ -201,7 +202,8 @@ public class TestConstraintExtractor
      * @implNote The timestamp is represented in milliseconds, and comparisons are made against a date cast from the timestamp.
      */
     @Test
-    public void testExtractTimestampDateComparison() {
+    public void testExtractTimestampDateComparison()
+    {
         // Symbol representing the timestamp column in the query
         String timestampColumnSymbol = "timestamp_symbol";
         // Casting the timestamp column to a date type

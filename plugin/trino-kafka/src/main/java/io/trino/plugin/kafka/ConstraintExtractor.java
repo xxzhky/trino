@@ -36,7 +36,6 @@ import io.trino.spi.type.Type;
 
 import java.time.Instant;
 import java.time.ZonedDateTime;
-import java.time.temporal.TemporalUnit;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
@@ -69,6 +68,7 @@ import static java.math.RoundingMode.UNNECESSARY;
 import static java.time.ZoneOffset.UTC;
 import static java.util.Locale.ENGLISH;
 import static java.util.Objects.requireNonNull;
+
 /**
  * This class is used to extract and manipulate constraint related data.
  * It provides static functions to handle different operations,
@@ -277,7 +277,6 @@ public final class ConstraintExtractor
             Constant constant,
             ColumnTypeProvider<C> columnTypeProvider)
     {
-
         if (constant.getValue() == null || constant.getType() != DateType.DATE) {
             return Optional.empty();
         }
@@ -288,7 +287,8 @@ public final class ConstraintExtractor
                     if (type instanceof TimestampWithTimeZoneType tztType && tztType.getPrecision() == 6) {
                         return unwrapTimestampTzToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
                                 .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
-                    } else if (type instanceof TimestampType tsType && tsType.getPrecision() == 3) {
+                    }
+                    else if (type instanceof TimestampType tsType && tsType.getPrecision() == 3) {
                         return unwrapTimestampToDateCast(column, functionName, (long) constant.getValue(), columnTypeProvider)
                                 .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
                     }
@@ -366,7 +366,6 @@ public final class ConstraintExtractor
             Function<Long, T> timestampCreator,
             Predicate<Type> typeValidator)
     {
-
         Type type = columnTypeProvider.getType(column).orElseThrow();
         checkArgument(typeValidator.test(type), "Column of unexpected type %s: %s", type, column);
 
@@ -423,8 +422,7 @@ public final class ConstraintExtractor
                 LESS_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, e)), false)),
                 GREATER_THAN_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, e)), false)),
                 GREATER_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, s)), false)),
-                IS_DISTINCT_FROM_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), true))
-        );
+                IS_DISTINCT_FROM_OPERATOR_FUNCTION_NAME, (t, s, e) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, s), Range.greaterThanOrEqual(t, e)), true)));
 
         return Optional.ofNullable(domainCreators.get(functionName))
                 .map(creator -> creator.create(type, startOfDate, startOfNextDate))
@@ -493,7 +491,8 @@ public final class ConstraintExtractor
                                         constant,
                                         ConstraintExtractor::convertToLongTimestampWithTimeZone)
                                         .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
-                            } else if (columnType instanceof TimestampType tsType && tsType.getPrecision() == 3 && constant.getType().equals(tsType)) {
+                            }
+                            else if (columnType instanceof TimestampType tsType && tsType.getPrecision() == 3 && constant.getType().equals(tsType)) {
                                 return unwrapDateTruncInComparison(((Slice) unit.getValue()).toStringUtf8(),
                                         functionName,
                                         constant,
@@ -501,8 +500,7 @@ public final class ConstraintExtractor
                                         .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
                             }
                             return Optional.<TupleDomain<C>>empty();
-                        }
-                );
+                        });
     }
 
     /**
@@ -557,7 +555,7 @@ public final class ConstraintExtractor
 
     private static Optional<ZonedDateTime> getZonedDateTimeFromConstant(Constant constant)
     {
-        final Map<Type, Function<Constant, ZonedDateTime>> TIMESTAMP_CONVERTERS = Map.of(
+        final Map<Type, Function<Constant, ZonedDateTime>> typeToConverter = Map.of(
                 TIMESTAMP_TZ_MICROS, c -> {
                     LongTimestampWithTimeZone timestamp = (LongTimestampWithTimeZone) c.getValue();
                     return Instant.ofEpochMilli(timestamp.getEpochMillis())
@@ -569,10 +567,9 @@ public final class ConstraintExtractor
                     return Instant.ofEpochMilli(timestamp / MICROSECONDS_PER_MILLISECOND)
                             .plusNanos(timestamp % MICROSECONDS_PER_MILLISECOND * NANOSECONDS_PER_MICROSECOND)
                             .atZone(UTC);
-                }
-                // add more converter functions
-        );
-        return Optional.ofNullable(TIMESTAMP_CONVERTERS.get(constant.getType()))
+                });
+        // add more converter functions
+        return Optional.ofNullable(typeToConverter.get(constant.getType()))
                 .map(converter -> converter.apply(constant));
     }
 
@@ -586,12 +583,11 @@ public final class ConstraintExtractor
     {
         //checkArgument(constant.getValue() != null, "Unexpected constant: %s", constant);
         //checkArgument(constant.getType().equals(TIMESTAMP_TZ_MICROS), "Unexpected type: %s", constant.getType());
-        Map<Type, Predicate<Object>> TIMESTAMP_TYPE_VALIDATORS = Map.of(
+        Map<Type, Predicate<Object>> typeValidators = Map.of(
                 TIMESTAMP_TZ_MICROS, value -> value instanceof LongTimestampWithTimeZone,
-                TIMESTAMP_MILLIS, value -> value instanceof Long
-                // Add more timestamp types and their corresponding validation logic here
-        );
-        return Optional.ofNullable(TIMESTAMP_TYPE_VALIDATORS.get(constant.getType()))
+                TIMESTAMP_MILLIS, value -> value instanceof Long);
+        // Add more timestamp types and their corresponding validation logic here
+        return Optional.ofNullable(typeValidators.get(constant.getType()))
                 .map(validator -> validator.test(constant.getValue()))
                 .orElse(false);
     }
@@ -641,8 +637,7 @@ public final class ConstraintExtractor
                 LESS_THAN_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, atStart ? s : e)), false)),
                 LESS_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.lessThan(t, e)), false)),
                 GREATER_THAN_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, e)), false)),
-                GREATER_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, atStart ? s : e)), false))
-        );
+                GREATER_THAN_OR_EQUAL_OPERATOR_FUNCTION_NAME, (t, s, e, atStart) -> Optional.of(Domain.create(ValueSet.ofRanges(Range.greaterThanOrEqual(t, atStart ? s : e)), false)));
 
         return Optional.ofNullable(domainCreators.get(functionName))
                 .map(creator -> creator.create(type, start, end, isConstantAtPeriodStart))
@@ -666,7 +661,8 @@ public final class ConstraintExtractor
         ZonedDateTime start;
         ZonedDateTime end;
 
-        PeriodInterval(ZonedDateTime start, ZonedDateTime end) {
+        PeriodInterval(ZonedDateTime start, ZonedDateTime end)
+        {
             this.start = start;
             this.end = end;
         }
@@ -712,7 +708,8 @@ public final class ConstraintExtractor
                         //checkArgument(ttzType.getPrecision() == 6, "Unexpected type: %s", type);
                         return unwrapYearInTimestampTzComparison(functionName, type, constant, ConstraintExtractor::convertToLongTimestampWithTimeZone, t -> t.equals(TIMESTAMP_TZ_MICROS))
                                 .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
-                    } else if (type instanceof TimestampType tsType && tsType.getPrecision() == 3) {
+                    }
+                    else if (type instanceof TimestampType tsType && tsType.getPrecision() == 3) {
                         return unwrapYearInTimestampTzComparison(functionName, type, constant, zonedDateTime -> zonedDateTime.toEpochSecond() * MICROSECONDS_PER_SECOND, t -> t.equals(TIMESTAMP_MILLIS))
                                 .map(domain -> TupleDomain.withColumnDomains(ImmutableMap.of(column, domain)));
                     }
@@ -748,7 +745,6 @@ public final class ConstraintExtractor
      */
     public record ExtractionResult<C extends ColumnHandle>(TupleDomain<C> tupleDomain, ConnectorExpression remainingExpression)
     {
-
         /**
          * This is a constructor for the `ExtractionResult`. It checks that both `tupleDomain` and
          * `remainingExpression` are not null before initializing.
