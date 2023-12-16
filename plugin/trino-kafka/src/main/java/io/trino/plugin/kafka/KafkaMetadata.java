@@ -133,6 +133,13 @@ public class KafkaMetadata
         return getTableMetadata(session, ((KafkaTableHandle) tableHandle).toSchemaTableName());
     }
 
+    /**
+     * Converts a TupleDomain of ColumnHandle to a TupleDomain of KafkaColumnHandle by simplifying the domains using the given threshold.
+     *
+     * @param predicate The TupleDomain of ColumnHandle to be converted.
+     * @param threshold The threshold used for domain simplification.
+     * @return The converted TupleDomain of KafkaColumnHandle.
+     */
     private static TupleDomain<KafkaColumnHandle> toCompactTupleDomain(TupleDomain<ColumnHandle> predicate, int threshold)
     {
         ImmutableMap.Builder<KafkaColumnHandle, Domain> builder = ImmutableMap.builder();
@@ -392,29 +399,6 @@ public class KafkaMetadata
             return Optional.of(new ConstraintApplicationResult<>(newHandle, isFullPushDown ? all() : remainingFilter, connectorExpression, false));
         }
 
-//        TupleDomain<ColumnHandle> oldDomain = handle.getConstraint();
-//        TupleDomain<ColumnHandle> newDomain = oldDomain.intersect(constraint.getSummary());
-//        if (oldDomain.equals(newDomain)) {
-//            return Optional.empty();
-//        }
-//
-//        handle = new KafkaTableHandle(
-//                handle.getSchemaName(),
-//                handle.getTableName(),
-//                handle.getTopicName(),
-//                handle.getKeyDataFormat(),
-//                handle.getMessageDataFormat(),
-//                handle.getKeyDataSchemaLocation(),
-//                handle.getMessageDataSchemaLocation(),
-//                handle.getKeySubject(),
-//                handle.getMessageSubject(),
-//                handle.getColumns(),
-//                TupleDomain.all(),
-//                newDomain,
-//                handle.getPredicateColumns(),
-//                handle.isRightForPush(),
-//                handle.getLimit());
-
         return Optional.of(new ConstraintApplicationResult<>(handle, effectivePredicate, connectorExpression, false));
     }
 
@@ -447,6 +431,12 @@ public class KafkaMetadata
         return Optional.of(new LimitApplicationResult<>(handle, true, true));
     }
 
+    /**
+     * Checks if it's possible to push down the given set of KafkaColumnHandles.
+     *
+     * @param columnHandles The set of KafkaColumnHandles to check.
+     * @return {@code true} if it's possible to push down all column handles, {@code false} otherwise.
+     */
     private boolean checkIfPossibleToPush(Set<KafkaColumnHandle> columnHandles)
     {
         // Check if possible to push-down.

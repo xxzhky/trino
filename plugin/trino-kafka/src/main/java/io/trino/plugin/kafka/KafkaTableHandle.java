@@ -69,7 +69,14 @@ public final class KafkaTableHandle
     private final TupleDomain<KafkaColumnHandle> compactEffectivePredicate;
     private final TupleDomain<ColumnHandle> constraint;
     private final Map<String, KafkaColumnHandle> predicateColumns;
+    /**
+     * Represents the flag indicating whether the table is right for pushdown.
+     */
     private final boolean rightForPush;
+    /**
+     * Represents a handle to a limit value in a Kafka table.
+     * The limit is an optional value indicating the maximum number of records to return in a query.
+     */
     private final OptionalLong limit;
 
     @JsonCreator
@@ -309,7 +316,7 @@ public final class KafkaTableHandle
      */
     public List<KafkaColumnHandle> getRemainingPredicateColumn(final KafkaInternalFieldManager internalFieldManager)
     {
-        // the connector for database does not support discrete range matching(or multiple ranges)
+        // the connector for database does not support discrete range matching(or multiple ranges) at right now
         // such as a query with the clause "where condition" like "where x in (2, 6) and (y > 7 or y = 7)"
         return constraint.getDomains()
                 .orElseGet(HashMap::new)
@@ -335,6 +342,16 @@ public final class KafkaTableHandle
                 .collect(toImmutableList());
     }
 
+    /**
+     * Returns the remaining filter for the Kafka table.
+     *
+     * This method filters out unnecessary predicates and returns the remaining filter as a TupleDomain of ColumnHandles.
+     * The remaining filter includes only the predicate columns that are compatible with the Kafka connector, such as
+     * columns that are part of the supported types and are associated with supported operations.
+     *
+     * @param internalFieldManager The KafkaInternalFieldManager used to retrieve the internal field ID of a column.
+     * @return The remaining filter as a TupleDomain of ColumnHandles that can be used for filtering.
+     */
     public TupleDomain<ColumnHandle> getRemainingFilter(final KafkaInternalFieldManager internalFieldManager)
     {
         // filter some unnecessary predicates
@@ -342,6 +359,12 @@ public final class KafkaTableHandle
                 .intersect(withColumnDomains(filterKeys(constraint.getDomains().get(), not(in(getRemainingPredicateColumn(internalFieldManager))))));
     }
 
+    /**
+     * Returns the enforced predicate for the Kafka table.
+     *
+     * @param internalFieldManager The KafkaInternalFieldManager used to retrieve the internal field ID of a column
+     * @return The enforced predicate for the Kafka table
+     */
     public TupleDomain<ColumnHandle> getEnforcedPredicate(final KafkaInternalFieldManager internalFieldManager)
     {
         return TupleDomain.<ColumnHandle>all()

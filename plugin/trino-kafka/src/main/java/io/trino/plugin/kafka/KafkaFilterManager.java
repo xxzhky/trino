@@ -114,6 +114,18 @@ public class KafkaFilterManager
         return new KafkaFilteringResult(partitionInfos, partitionBeginOffsets, partitionEndOffsets);
     }
 
+    /**
+     * Builds the filtering result for Kafka based on the given parameters and the predicate.
+     *
+     * @param session The connector session.
+     * @param kafkaTableHandle The Kafka table handle.
+     * @param predicate The predicate in the form of TupleDomain.
+     * @param partitionInfos The list of partition information.
+     * @param partitionBeginOffsets The map of partition begin offsets.
+     * @param partitionEndOffsets The map of partition end offsets.
+     *
+     * @return The filtering result for Kafka.
+     */
     private KafkaFilteringResult buildFilterResult(ConnectorSession session,
                                                    KafkaTableHandle kafkaTableHandle,
                                                    TupleDomain<KafkaColumnHandle> predicate,

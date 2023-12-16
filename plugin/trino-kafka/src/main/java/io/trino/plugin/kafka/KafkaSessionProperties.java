@@ -26,7 +26,25 @@ import static io.trino.spi.session.PropertyMetadata.booleanProperty;
 public final class KafkaSessionProperties
         implements SessionPropertiesProvider
 {
+    /**
+     * The session property name for enabling or disabling timestamp upper bound push down for topics using "CreateTime" mode.
+     * The upper bound predicate is pushed down only for topics using "LogAppendTime" mode.
+     * By default, this property is set to false.
+     * To enable timestamp upper bound push down, set this property to true.
+     *
+     * @see KafkaSessionProperties#isTimestampUpperBoundPushdownEnabled(ConnectorSession)
+     */
     private static final String TIMESTAMP_UPPER_BOUND_FORCE_PUSH_DOWN_ENABLED = "timestamp_upper_bound_force_push_down_enabled";
+    /**
+     * Represents the session property name for enabling or disabling predicate force push down.
+     *
+     * By default, predicate push down is enabled. This means that predicate push down is attempted for all queries.
+     *
+     * Predicate push down can be disabled via the "kafka.predicate_force_push_down_enabled" config property
+     * or the "predicate_force_push_down_enabled" session property.
+     *
+     * @see KafkaSessionProperties#isPredicatePushDownEnabled(ConnectorSession)
+     */
     private static final String PREDICATE_FORCE_PUSH_DOWN_ENABLED = "predicate_force_push_down_enabled";
     private final List<PropertyMetadata<?>> sessionProperties;
 

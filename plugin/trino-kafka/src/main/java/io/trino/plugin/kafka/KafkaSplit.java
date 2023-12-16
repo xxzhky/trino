@@ -68,6 +68,12 @@ public class KafkaSplit
         this.limit = requireNonNull(limit, "limit is null");
     }
 
+    /**
+     * Returns a KafkaSplit object for the given messagesRange.
+     *
+     * @param messagesRange The range of messages for the split.
+     * @return A KafkaSplit object initialized with the appropriate properties.
+     */
     public KafkaSplit getSplitByRange(Range messagesRange)
     {
         return new KafkaSplit(
