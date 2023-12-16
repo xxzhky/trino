@@ -379,14 +379,16 @@ public final class ConstraintExtractor
     }
 
     /**
-     * Unwraps the year in a comparison between a timestamp with time zone column
-     * and a constant.
+     * Unwraps the year component from a given timestamp with timezone comparison.
      *
-     * @param functionName the name of the function being evaluated
-     * @param type the type of the timestamp with time zone column
-     * @param constant the constant value being compared against
-     * @return an Optional containing the unwrapped domain if the constant value is not null
-     * and the type of the column is TIMESTAMP_TZ_MICROS, otherwise an empty Optional
+     * @param functionName The name of the function being executed.
+     * @param type The type of the comparison.
+     * @param constant The constant value being compared.
+     * @param timestampCalculator The function to calculate the timestamp from the year component.
+     * @param typeValidator The predicate to validate the type.
+     * @param <T> The type of the timestamp.
+     * @return An Optional containing the Domain object created from the calculated start and end timestamps.
+     * @throws IllegalArgumentException if the constant value is null or if the type is not valid.
      */
     private static <T> Optional<Domain> unwrapYearInTimestampTzComparison(FunctionName functionName, Type type, Constant constant, Function<ZonedDateTime, T> timestampCalculator, Predicate<Type> typeValidator)
     {
