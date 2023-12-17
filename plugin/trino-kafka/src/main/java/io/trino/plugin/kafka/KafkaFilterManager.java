@@ -107,12 +107,42 @@ public class KafkaFilterManager
         OptionalLong limit = kafkaTableHandle.getLimit();
         // here push down limit at the very end of the scenario
         if (limit.isPresent()) {
-            Map<TopicPartition, Long> finalPartitionBeginOffsets = partitionBeginOffsets;
-            partitionEndOffsets = overridePartitionEndOffsets(partitionEndOffsets,
-                    partition -> (finalPartitionBeginOffsets.get(partition) != INVALID_KAFKA_RANGE_INDEX)
-                            ? Optional.of(finalPartitionBeginOffsets.get(partition) + limit.getAsLong()) : Optional.empty());
+            partitionEndOffsets = applyLimitToPartitionEndOffsets(partitionEndOffsets, partitionBeginOffsets, limit);
         }
         return new KafkaFilteringResult(partitionInfos, partitionBeginOffsets, partitionEndOffsets);
+    }
+
+    private Map<TopicPartition, Long> applyLimitToPartitionEndOffsets(
+            Map<TopicPartition, Long> partitionEndOffsets,
+            Map<TopicPartition, Long> partitionBeginOffsets,
+            OptionalLong limit)
+    {
+        Map<TopicPartition, Long> finalPartitionBeginOffsets = partitionBeginOffsets;
+        return overridePartitionEndOffsets(partitionEndOffsets,
+                partition -> calculateNewEndOffset(finalPartitionBeginOffsets, partition, limit));
+    }
+
+    private Optional<Long> calculateNewEndOffset(
+            Map<TopicPartition, Long> partitionBeginOffsets,
+            TopicPartition partition,
+            OptionalLong limit)
+    {
+        return Optional.ofNullable(partitionBeginOffsets.get(partition))
+                .filter(beginOffset -> beginOffset != INVALID_KAFKA_RANGE_INDEX)
+                .flatMap(beginOffset -> safelyAddLimit(beginOffset, limit));
+    }
+
+    private Optional<Long> safelyAddLimit(long beginOffset, OptionalLong limit)
+    {
+        if (limit.isPresent()) {
+            try {
+                return Optional.of(Math.addExact(beginOffset, limit.getAsLong()));
+            }
+            catch (ArithmeticException e) {
+                // Overflow occurred, return empty Optional.
+            }
+        }
+        return Optional.empty();
     }
 
     /**
