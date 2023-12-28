@@ -13,7 +13,6 @@
  */
 package io.trino.plugin.kafka;
 
-import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
 import io.trino.plugin.kafka.encoder.DispatchingRowEncoderFactory;
 import io.trino.plugin.kafka.encoder.EncoderColumnHandle;
@@ -34,12 +33,14 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import static io.trino.plugin.kafka.KafkaErrorCode.KAFKA_SCHEMA_ERROR;
 import static io.trino.plugin.kafka.encoder.KafkaFieldType.KEY;
 import static io.trino.plugin.kafka.encoder.KafkaFieldType.MESSAGE;
 import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toList;
 
 public class KafkaPageSinkProvider
         implements ConnectorPageSinkProvider
@@ -66,27 +67,16 @@ public class KafkaPageSinkProvider
         requireNonNull(tableHandle, "tableHandle is null");
         KafkaTableHandle handle = (KafkaTableHandle) tableHandle;
 
-        ImmutableList.Builder<EncoderColumnHandle> keyColumns = ImmutableList.builder();
-        ImmutableList.Builder<EncoderColumnHandle> messageColumns = ImmutableList.builder();
-        handle.getColumns().forEach(col -> {
-            if (col.isInternal()) {
-                throw new IllegalArgumentException(format("unexpected internal column '%s'", col.getName()));
-            }
-            if (col.isKeyCodec()) {
-                keyColumns.add(col);
-            }
-            else {
-                messageColumns.add(col);
-            }
-        });
+        List<EncoderColumnHandle> keyColumns = getColumns(handle.getColumns(), KafkaColumnHandle::isKeyCodec);
+        List<EncoderColumnHandle> messageColumns = getColumns(handle.getColumns(), col -> !col.isInternal() && !col.isKeyCodec());
 
         RowEncoder keyEncoder = encoderFactory.create(
                 session,
-                toRowEncoderSpec(handle, keyColumns.build(), KEY));
+                toRowEncoderSpec(handle, keyColumns, KEY));
 
         RowEncoder messageEncoder = encoderFactory.create(
                 session,
-                toRowEncoderSpec(handle, messageColumns.build(), MESSAGE));
+                toRowEncoderSpec(handle, messageColumns, MESSAGE));
 
         return new KafkaPageSink(
                 handle.getTopicName(),
@@ -95,6 +85,13 @@ public class KafkaPageSinkProvider
                 messageEncoder,
                 producerFactory,
                 session);
+    }
+
+    private List<EncoderColumnHandle> getColumns(List<KafkaColumnHandle> columns, Predicate<KafkaColumnHandle> columnFilterPredicate)
+    {
+        return columns.stream()
+                .filter(columnFilterPredicate::test)
+                .collect(toList());
     }
 
     private static RowEncoderSpec toRowEncoderSpec(KafkaTableHandle handle, List<EncoderColumnHandle> columns, KafkaFieldType kafkaFieldType)
